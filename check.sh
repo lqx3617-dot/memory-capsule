@@ -56,11 +56,11 @@ else
 fi
 
 step "2/4 语法编译"
-if "$PY" -m compileall -q "$ROOT/brain_memory" "$ROOT/examples" "$ROOT/app_integration.py" >/dev/null 2>&1; then
-  ok "compileall 通过（brain_memory + examples + app_integration）"
+if "$PY" -m compileall -q "$ROOT/brain_memory" "$ROOT/examples" "$ROOT/app_integration.py" "$ROOT/记忆胶囊.py" >/dev/null 2>&1; then
+  ok "compileall 通过（含中文别名入口）"
 else
   bad "compileall 失败"
-  "$PY" -m compileall "$ROOT/brain_memory" "$ROOT/examples" "$ROOT/app_integration.py"
+  "$PY" -m compileall "$ROOT/brain_memory" "$ROOT/examples" "$ROOT/app_integration.py" "$ROOT/记忆胶囊.py"
 fi
 
 step "3/4 真建库体检"

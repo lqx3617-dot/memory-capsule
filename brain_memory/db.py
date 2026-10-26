@@ -190,7 +190,7 @@ class MemoryDB:
             try:
                 conn.execute(f"PRAGMA {name}={value}")
             except sqlite3.Error as exc:
-                logger.warning("brain_memory: PRAGMA %s=%s 设置失败: %s", name, value, exc)
+                logger.warning("记忆胶囊: PRAGMA %s=%s 设置失败: %s", name, value, exc)
 
     @staticmethod
     def _pragma_scalar(conn: sqlite3.Connection, stmt: str) -> str:
@@ -212,7 +212,7 @@ class MemoryDB:
             actual = self._pragma_scalar(self._writer, f"journal_mode={target}")
         except sqlite3.Error as exc:
             logger.warning(
-                "brain_memory: journal_mode=%s 设置异常（%s），准备回退 DELETE", target, exc
+                "记忆胶囊: journal_mode=%s 设置异常（%s），准备回退 DELETE", target, exc
             )
             actual = ""
 
@@ -226,7 +226,7 @@ class MemoryDB:
             self._journal_mode = fallback or "delete"
             self._degraded_wal = True
             logger.warning(
-                "brain_memory: journal_mode 降级 requested=%s actual=%s —— 并发模型切换为全局互斥",
+                "记忆胶囊: journal_mode 降级 requested=%s actual=%s —— 并发模型切换为全局互斥",
                 target,
                 self._journal_mode,
             )
@@ -243,7 +243,7 @@ class MemoryDB:
                     f"PRAGMA wal_autocheckpoint={int(self._cfg.wal_autocheckpoint)}"
                 )
             except sqlite3.Error as exc:
-                logger.warning("brain_memory: wal_autocheckpoint 设置失败: %s", exc)
+                logger.warning("记忆胶囊: wal_autocheckpoint 设置失败: %s", exc)
 
     def _build_sync(self) -> None:
         use_global = (
@@ -274,7 +274,7 @@ class MemoryDB:
                     "schema_migrate",
                     detail={"from": 0, "to": SCHEMA_VERSION},
                 )
-            logger.info("brain_memory: schema 从 v0 迁移到 v%d", SCHEMA_VERSION)
+            logger.info("记忆胶囊: schema 从 v0 迁移到 v%d", SCHEMA_VERSION)
             return
         if version < SCHEMA_VERSION:
             self._migrate(version)
@@ -301,7 +301,7 @@ class MemoryDB:
                     detail={"from": from_version, "to": SCHEMA_VERSION},
                 )
             logger.info(
-                "brain_memory: schema 从 v%d 迁移到 v%d（新增 atoms.embedding）",
+                "记忆胶囊: schema 从 v%d 迁移到 v%d（新增 atoms.embedding）",
                 from_version,
                 SCHEMA_VERSION,
             )
@@ -343,11 +343,11 @@ class MemoryDB:
             except sqlite3.Error as exc:
                 last_error = exc
                 logger.warning(
-                    "brain_memory: FTS5 tokenizer=%s 不可用（%s），尝试下一个", tokenizer, exc
+                    "记忆胶囊: FTS5 tokenizer=%s 不可用（%s），尝试下一个", tokenizer, exc
                 )
                 continue
             self._fts_tokenizer = label
-            logger.info("brain_memory: atoms_fts 已建立 tokenizer=%s", label)
+            logger.info("记忆胶囊: atoms_fts 已建立 tokenizer=%s", label)
             try:  # 已有数据时补齐索引
                 conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')")
             except sqlite3.Error:
@@ -368,13 +368,13 @@ class MemoryDB:
         except Exception as exc:  # 双保险：探测本身出事也按 none 处理
             backend = "none"
             store.last_error = "探测异常: " + str(exc)
-            logger.warning("brain_memory: 向量探测异常，按 none 处理: %s", exc)
+            logger.warning("记忆胶囊: 向量探测异常，按 none 处理: %s", exc)
         self._vector_backend = backend
 
         info = store.describe()
         if backend == "none":
             logger.warning(
-                "brain_memory: 向量后端 = none（%s），检索走纯 FTS5/LIKE",
+                "记忆胶囊: 向量后端 = none（%s），检索走纯 FTS5/LIKE",
                 info.get("last_error") or "未启用",
             )
             if self._cfg.require_vector:
@@ -389,7 +389,7 @@ class MemoryDB:
             return
 
         logger.info(
-            "brain_memory: 向量后端 = %s dim=%s embedder=%s",
+            "记忆胶囊: 向量后端 = %s dim=%s embedder=%s",
             backend,
             info.get("dim"),
             info.get("embedder"),
@@ -410,7 +410,7 @@ class MemoryDB:
     def mark_llm_degraded(self, reason: str = "") -> None:
         """T4 门控在 LLM 调用失败后调用；不抛异常。"""
         self._llm_mode = "degraded"
-        logger.warning("brain_memory: LLM 降级为规则门控（%s）", reason or "unknown")
+        logger.warning("记忆胶囊: LLM 降级为规则门控（%s）", reason or "unknown")
 
     def mark_llm_ok(self) -> None:
         if self._llm_mode == "degraded" and self._cfg.enable_llm_gate:
@@ -570,7 +570,7 @@ class MemoryDB:
                 try:
                     self._flush_access_internal()
                 except Exception as exc:
-                    logger.warning("brain_memory: 访问计数刷盘失败（已回滚进内存）: %s", exc)
+                    logger.warning("记忆胶囊: 访问计数刷盘失败（已回滚进内存）: %s", exc)
 
         self._flusher = threading.Thread(
             target=loop, name="brain_memory-flusher", daemon=True
@@ -581,7 +581,7 @@ class MemoryDB:
 
     def _log_ready(self) -> None:
         logger.info(
-            "brain_memory: open path=%s journal_mode=%s sync=%s mmap=%s busy=%s "
+            "记忆胶囊: open path=%s journal_mode=%s sync=%s mmap=%s busy=%s "
             "sqlite=%s vec=%s llm=%s fts=%s pool=%d lock=%s",
             self._path,
             self._journal_mode,
@@ -831,7 +831,7 @@ class MemoryDB:
         """默认只读：返回将被静默/归档的条目，库内一行不改。"""
         self._ensure_open()
         if dry_run and (hard or confirm):
-            logger.warning("brain_memory: dry_run=True 时忽略 hard/confirm")
+            logger.warning("记忆胶囊: dry_run=True 时忽略 hard/confirm")
         decisions = forget_scan(self, limit=limit, older_than_days=older_than_days)
         if dry_run:
             return [d.as_dict() for d in decisions]
@@ -996,7 +996,7 @@ class MemoryDB:
                     conn.execute("PRAGMA optimize")
                     result["optimized"] = True
                 except sqlite3.Error as exc:
-                    logger.warning("brain_memory: PRAGMA optimize 失败: %s", exc)
+                    logger.warning("记忆胶囊: PRAGMA optimize 失败: %s", exc)
 
                 if level in ("normal", "full") and self._journal_mode == "wal":
                     try:
@@ -1004,14 +1004,14 @@ class MemoryDB:
                         if row is not None and len(row) >= 2:
                             result["checkpointed_pages"] = int(row[1])
                     except sqlite3.Error as exc:
-                        logger.warning("brain_memory: wal_checkpoint 失败: %s", exc)
+                        logger.warning("记忆胶囊: wal_checkpoint 失败: %s", exc)
 
                 if level == "full":
                     try:
                         conn.execute("VACUUM")
                         result["vacuumed"] = True
                     except sqlite3.Error as exc:
-                        logger.warning("brain_memory: VACUUM 失败: %s", exc)
+                        logger.warning("记忆胶囊: VACUUM 失败: %s", exc)
         finally:
             self._end_op()
 
@@ -1028,7 +1028,7 @@ class MemoryDB:
     def close(self, timeout: float = 5.0) -> None:
         """幂等。时序：置位 → 等在飞 → 停 flusher → flush → checkpoint → 关连接。"""
         if not self._close_lock.acquire(timeout=max(0.1, timeout)):
-            logger.warning("brain_memory: 另一个线程正在关闭，本次 close 直接返回")
+            logger.warning("记忆胶囊: 另一个线程正在关闭，本次 close 直接返回")
             return
         try:
             if self._closed:
@@ -1042,7 +1042,7 @@ class MemoryDB:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         logger.warning(
-                            "brain_memory: close 等待在飞操作超时（in_flight=%d），继续关闭",
+                            "记忆胶囊: close 等待在飞操作超时（in_flight=%d），继续关闭",
                             self._in_flight,
                         )
                         break
@@ -1056,15 +1056,15 @@ class MemoryDB:
             try:
                 flushed = self._flush_access_internal()
                 if flushed:
-                    logger.info("brain_memory: close 前刷入 %d 条访问计数", flushed)
+                    logger.info("记忆胶囊: close 前刷入 %d 条访问计数", flushed)
             except Exception as exc:
-                logger.warning("brain_memory: close 时访问计数刷盘失败: %s", exc)
+                logger.warning("记忆胶囊: close 时访问计数刷盘失败: %s", exc)
 
             if self._journal_mode == "wal" and self._writer is not None:
                 try:
                     self._writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 except sqlite3.Error as exc:
-                    logger.warning("brain_memory: close 时 checkpoint 失败: %s", exc)
+                    logger.warning("记忆胶囊: close 时 checkpoint 失败: %s", exc)
 
             while True:
                 try:
@@ -1078,7 +1078,7 @@ class MemoryDB:
 
             with self._state_lock:
                 self._closed = True
-            logger.info("brain_memory: closed path=%s", self._path)
+            logger.info("记忆胶囊: closed path=%s", self._path)
         finally:
             self._close_lock.release()
 

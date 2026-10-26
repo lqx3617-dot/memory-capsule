@@ -1,4 +1,4 @@
-"""命令行入口：python -m brain_memory <command> ...
+"""记忆胶囊命令行入口：python -m brain_memory <command> ...
 
 CLI 是附带品，不是主交付物。App 里永远走 import，不要 fork 子进程调 CLI。
 """
@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="覆盖配置项，可重复，例如 --config journal_mode_target=DELETE",
     )
     parser.add_argument("--log-level", default=None, choices=_LOG_LEVELS)
-    parser.add_argument("--version", action="version", version="brain_memory " + __version__)
+    parser.add_argument("--version", action="version", version="记忆胶囊 (brain_memory) " + __version__)
 
     sub = parser.add_subparsers(dest="command", required=True)
 

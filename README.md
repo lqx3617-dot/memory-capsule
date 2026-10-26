@@ -1,4 +1,6 @@
-# brain_memory
+# 记忆胶囊
+
+> 中文名：**记忆胶囊**　包名：`brain_memory`（`import brain_memory`，pip 名不变）
 
 可嵌入的长期记忆库。**纯 stdlib + sqlite3**，无 HTTP 服务、无 Redis、无模型权重、无 root 依赖。
 专为 Android PRoot（Termux / proot-distro，aarch64 用户态）设计，所有降级路径自动兜底。

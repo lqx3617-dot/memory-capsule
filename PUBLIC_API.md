@@ -1,4 +1,4 @@
-# PUBLIC_API.md — brain_memory 公开 API 契约
+# PUBLIC_API.md — 记忆胶囊（brain_memory）公开 API 契约
 
 **版本** v0.1（待确认）　**稳定性承诺** Phase 1 冻结下列签名；任何破坏性变更走主版本号。
 

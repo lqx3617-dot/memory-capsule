@@ -1,4 +1,4 @@
-# EMBEDDING.md —— 在 App 里怎么用 brain_memory
+# EMBEDDING.md —— 在 App 里怎么用记忆胶囊
 
 给业务代码看的。只讲结论和坑，不讲原理。
 

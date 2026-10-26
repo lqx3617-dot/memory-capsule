@@ -1,4 +1,4 @@
-"""brain_memory 异常层级。
+"""记忆胶囊 异常层级。
 
 设计原则：降级（WAL 失败 / sqlite-vec 不可用 / LLM 不可用）**不抛异常**，
 只写日志 + 记录可观测字段；只有调用方显式要求（require_wal / require_vector）时才抛。

@@ -427,7 +427,7 @@ class VectorStore:
         if self._fail_count >= self.cfg.vec_fail_limit:
             if self.backend != "none":
                 logger.warning(
-                    "brain_memory: 向量连续失败 %d 次，停用向量后端（%s），检索退回 FTS5",
+                    "记忆胶囊: 向量连续失败 %d 次，停用向量后端（%s），检索退回 FTS5",
                     self._fail_count,
                     message,
                 )

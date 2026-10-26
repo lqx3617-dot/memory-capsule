@@ -1,4 +1,4 @@
-# PLAN.md — brain_memory 长期记忆库
+# PLAN.md — 记忆胶囊（brain_memory）长期记忆库
 
 **版本** v0.1（待确认）　**目标环境** Android PRoot / Termux / aarch64 / Python 3.10+ / 无 root / 无 systemd
 **规则来源** 仓库根 `README.md`（即提交信息所称 AGENT_RULES.md 的正文；`AGENT_RULES.md` 文件本身在仓库中不存在，404）
