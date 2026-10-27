@@ -30,9 +30,12 @@
 `commit_batch`、`raise_on_llm_error`、`max_candidates_per_ingest`、`numpy_fallback_max_atoms` ——
 四个在代码里零引用，改了不起作用。现在传进来会明确抛 `ConfigError: 未知配置项`。
 
+### 版本
+
+`pyproject.toml` 的 version 同步为 `1.1.0`（此前停留在 `0.1.0.dev1`，与 CHANGELOG 不一致）。
+
 ## v1.0.0 —— 2026-10-27
 
-> 注：`pyproject.toml` 的 version 仍为 `0.1.0.dev1`，与本节版本号不一致，下次发版统一。
 
 首个公开版本。
 
