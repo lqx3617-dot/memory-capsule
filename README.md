@@ -49,7 +49,7 @@ brain_memory/
 ├── __init__.py     公开导出（Database / Config 是别名）
 ├── __main__.py     python -m brain_memory
 ├── cli.py          命令行
-├── config.py       MemoryConfig（73 个配置项）
+├── config.py       MemoryConfig（69 个配置项）
 ├── db.py           MemoryDB：连接 / PRAGMA / 锁 / 池 / flusher / 业务 API
 ├── errors.py       异常层级
 ├── types.py        Memory / Stats / ForgetDecision + 枚举

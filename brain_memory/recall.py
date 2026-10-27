@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterable
 
+from .forget import compute_quality
 from .types import Memory, parse_utc
 
 if TYPE_CHECKING:
@@ -77,7 +78,7 @@ def build_match_expr(query: str, tokenizer: str) -> str:
 _SELECT = (
     "SELECT a.id AS id, a.content AS content, a.source_event_id AS source_event_id, "
     "a.confidence AS confidence, a.quality AS quality, a.fact_type AS fact_type, "
-    "a.entity_id AS entity_id, a.access_count AS access_count, "
+    "a.entity_id AS entity_id, a.access_count AS access_count, a.feedback AS feedback, "
     "a.created_at AS created_at, a.last_accessed_at AS last_accessed_at, "
     "bm25(atoms_fts) AS rank "
     "FROM atoms_fts JOIN atoms a ON a.id = atoms_fts.rowid "
@@ -105,7 +106,7 @@ def _like_fallback(conn, query: str, limit: int, min_quality: float) -> list:
     params = ["%" + t + "%" for t in toks]
     sql = (
         "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-        "entity_id, access_count, created_at, last_accessed_at, 0.0 AS rank "
+        "entity_id, access_count, feedback, created_at, last_accessed_at, 0.0 AS rank "
         "FROM atoms WHERE state = 'active' AND quality >= ? AND (" + where + ") "
         "ORDER BY quality DESC LIMIT ?"
     )
@@ -123,9 +124,29 @@ def _rrf(rankings: list[list[int]], k: int) -> dict[int, float]:
 
 _ROW_SQL = (
     "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-    "entity_id, access_count, created_at, last_accessed_at FROM atoms "
+    "entity_id, access_count, feedback, created_at, last_accessed_at FROM atoms "
     "WHERE state = 'active' AND id IN ({marks})"
 )
+
+
+def live_quality(cfg, row: dict) -> float:
+    """现场重算 quality —— 存储值只是写入时的快照，会随时间失真。
+
+    atoms.quality 写入时 = confidence，之后不会自己衰减；而 forget/dream
+    判定用的是 compute_quality()。两套口径会让 recall 的 min_quality 过滤形同虚设
+    （半年前的记忆存储值仍是 0.7）。这里统一成「现算」，与 forget/dream 同源。
+    """
+    try:
+        return compute_quality(
+            cfg=cfg,
+            feedback=float(row.get("feedback") if row.get("feedback") is not None else 1.0),
+            fact_type=str(row.get("fact_type") or "fact"),
+            last_active=parse_utc(row.get("last_accessed_at")) or parse_utc(row.get("created_at")),
+            refs=0,
+            access_count=int(row.get("access_count") or 0),
+        )
+    except Exception:
+        return float(row.get("quality") or 0.0)
 
 
 def _fetch_rows(conn, ids: list[int]) -> dict[int, dict]:
@@ -314,9 +335,8 @@ def search(
         if match_expr:
             sql = _SELECT
             params: list[object] = [match_expr]
-            if floor_quality > 0:
-                sql += " AND a.quality >= ?"
-                params.append(floor_quality)
+            # 不在这里按 a.quality 预过滤：存储值是写入快照，会让过滤形同虚设。
+            # 统一在下面的预算循环里用 live_quality() 判定。
             if types:
                 sql += " AND a.fact_type IN (" + ",".join("?" * len(types)) + ")"
                 params.extend(types)
@@ -388,7 +408,7 @@ def search(
         for atom_id in vec_ranked:
             if atom_id not in rows_by_id:
                 continue
-            quality = float(rows_by_id[atom_id].get("quality") or 0.0)
+            quality = live_quality(cfg, rows_by_id[atom_id])
             sim = vec_sims.get(atom_id, 0.0)
             ranked_items.append((atom_id, min(1.0, 0.8 * sim + 0.2 * quality)))
         ranked_items.sort(key=lambda item: item[1], reverse=True)
@@ -401,7 +421,7 @@ def search(
             row = rows_by_id[atom_id]
             rank = float(row.get("rank", 0.0))
             norm = 1.0 if span <= 1e-9 else (hi - rank) / span
-            quality = float(row.get("quality") or 0.0)
+            quality = live_quality(cfg, row)
             recency = _recency(row.get("created_at"), row.get("last_accessed_at"))
             score = cfg.w_bm25 * norm + cfg.w_quality * quality + cfg.w_recency * recency
             ranked_items.append((atom_id, score))
@@ -412,7 +432,7 @@ def search(
     used_tokens = 0
     for atom_id, score in ranked_items:
         row = rows_by_id[atom_id]
-        quality = float(row.get("quality") or 0.0)
+        quality = live_quality(cfg, row)
         if quality < floor_quality:
             continue
         if types and str(row.get("fact_type")) not in types:

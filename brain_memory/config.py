@@ -70,7 +70,6 @@ class MemoryConfig:
     read_pool_size: int = 2               # 读连接池大小；0 = 读也走写连接
     create_dirs: bool = True
     require_wal: bool = False             # True 时 WAL 失败抛 DatabaseError
-    commit_batch: int = 1                 # >1 时 ingest 合并提交（T4 使用）
 
     # ---- flusher ----
     access_flush_batch: int = 32
@@ -85,13 +84,11 @@ class MemoryConfig:
     llm_model: str | None = None
     llm_timeout_s: float = 8.0
     llm_cooldown_s: float = 60.0
-    raise_on_llm_error: bool = False
 
     # ---- 晋升 ----
     enable_promote: bool = True
     promote_min_confidence: float = 0.55
     dedup_similarity: float = 0.9
-    max_candidates_per_ingest: int = 3
     max_atom_chars: int = 2000
 
     # ---- 检索 ----
@@ -120,8 +117,7 @@ class MemoryConfig:
     require_vector: bool = False
     enable_numpy_fallback: bool = True
     enable_pure_fallback: bool = True
-    numpy_fallback_max_atoms: int = 5000     # 兼容保留
-    pure_fallback_max_atoms: int = 5000      # pure/numpy 暴力余弦的扫描上限
+    pure_fallback_max_atoms: int = 5000      # 单次暴力余弦最多扫描多少条（分块扫，不只看最老）
     vec_min_similarity: float = 0.10         # 向量召回的相似度下限，低于此值直接丢
     vec_fail_limit: int = 3                  # 连续失败几次就整体停用向量（防 API 挂了拖慢 ingest）
     rrf_k: int = 60                          # RRF 融合常数
@@ -218,7 +214,6 @@ class MemoryConfig:
         self._require(self.mmap_size >= 0, "mmap_size 不能为负")
         self._require(self.read_pool_size >= 0, "read_pool_size 不能为负")
         self._require(self.read_pool_size <= 3, "read_pool_size 上限 3（PRoot 内存敏感）")
-        self._require(self.commit_batch >= 1, "commit_batch 至少 1")
         self._require(self.cache_size_kb != 0, "cache_size_kb 不能为 0")
 
         self._require(1 <= self.access_flush_batch <= 4096, "access_flush_batch 需在 1..4096")
@@ -233,7 +228,6 @@ class MemoryConfig:
         self._require(0.0 <= self.promote_min_confidence <= 1.0,
                       "promote_min_confidence 需在 0..1")
         self._require(0.0 <= self.dedup_similarity <= 1.0, "dedup_similarity 需在 0..1")
-        self._require(self.max_candidates_per_ingest >= 1, "max_candidates_per_ingest 至少 1")
         self._require(self.max_atom_chars >= 16, "max_atom_chars 至少 16")
 
         for name in ("w_bm25", "w_quality", "w_recency"):
@@ -248,7 +242,6 @@ class MemoryConfig:
         self._require(self.escalate_l0_limit >= 1, "escalate_l0_limit 至少 1")
 
         self._require(self.vec_dim > 0, "vec_dim 需大于 0")
-        self._require(self.numpy_fallback_max_atoms >= 0, "numpy_fallback_max_atoms 不能为负")
         self._require(self.pure_fallback_max_atoms >= 0, "pure_fallback_max_atoms 不能为负")
         if str(self.vector_backend_policy).lower() not in {"auto", "sqlite-vec", "numpy", "pure", "none"}:
             raise ConfigError("vector_backend_policy 只能是 auto/sqlite-vec/numpy/pure/none")

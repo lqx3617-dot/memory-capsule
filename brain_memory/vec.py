@@ -208,6 +208,19 @@ def unpack_vector(blob: bytes | memoryview | None) -> list[float]:
     return list(struct.unpack("<%df" % count, data[: count * 4]))
 
 
+def distance_to_similarity(distance: float) -> float:
+    """L2 距离 -> 余弦等价相似度（归一化向量下 L2^2 = 2 - 2cos）。
+
+    原来用 1/(1+distance)：最不像的一对（d=2）还有 0.33，
+    配 vec_min_similarity=0.10 等于什么都过滤不掉，噪声整条灌进 RRF。
+    """
+    try:
+        d = float(distance)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(-1.0, min(1.0, 1.0 - (d * d) / 2.0))
+
+
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
@@ -266,7 +279,7 @@ class VectorStore:
                 return self.backend
 
         if policy in ("auto", "numpy", "pure", "sqlite-vec"):
-            if policy in ("auto", "numpy"):
+            if policy == "numpy" or (policy == "auto" and cfg.enable_numpy_fallback):
                 try:
                     import numpy as _np  # type: ignore
 
@@ -375,19 +388,38 @@ class VectorStore:
             return []
         out = []
         for row in rows:
-            distance = float(row[1])
-            out.append((int(row[0]), 1.0 / (1.0 + max(0.0, distance))))
+            out.append((int(row[0]), distance_to_similarity(row[1])))
         return out
 
     def _search_bruteforce(self, conn: Any, qvec: list[float], limit: int):
         cap = int(self.cfg.pure_fallback_max_atoms)
+        # 分块扫描：cap 现在是「本次最多扫多少条」，不再是「只看最老多少条」。
+        # 新记忆优先（id DESC），块内算完继续下一块，扫到 cap 或表尾为止。
+        chunk = 1000
+        rows: list = []
         try:
-            rows = conn.execute(
-                "SELECT id, embedding FROM atoms "
-                "WHERE embedding IS NOT NULL AND state = 'active' "
-                "ORDER BY id DESC LIMIT ?",
-                (cap,),
-            ).fetchall()
+            last_id = None
+            while len(rows) < cap:
+                if last_id is None:
+                    part = conn.execute(
+                        "SELECT id, embedding FROM atoms "
+                        "WHERE embedding IS NOT NULL AND state = 'active' "
+                        "ORDER BY id DESC LIMIT ?",
+                        (min(chunk, cap - len(rows)),),
+                    ).fetchall()
+                else:
+                    part = conn.execute(
+                        "SELECT id, embedding FROM atoms "
+                        "WHERE embedding IS NOT NULL AND state = 'active' AND id < ? "
+                        "ORDER BY id DESC LIMIT ?",
+                        (last_id, min(chunk, cap - len(rows))),
+                    ).fetchall()
+                if not part:
+                    break
+                rows.extend(part)
+                last_id = int(part[-1][0])
+                if len(part) < chunk:
+                    break
         except Exception as exc:
             self.last_error = "读取 embedding 失败: " + str(exc)
             return []

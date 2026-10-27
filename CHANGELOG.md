@@ -1,5 +1,35 @@
 # 更新记录
 
+## v1.1.0 —— 2026-10-27
+
+质量与判据修复，含 3 处 config 项移除（**breaking**：删掉的键会以 ConfigError 明确报错，不再静默无效）。
+
+### 质量单一真源
+
+- `atoms.quality` 从此只作「最近一次重算的快照」：`recall` / `facts` 的过滤与打分一律现场调用
+  `compute_quality()`，与 `forget` / `dream` 同源。
+- 修前：存储值恒等于写入时的 confidence，永不衰减 —— 半年前的记忆存储 0.70、实算 0.25，
+  `recall(min_quality=0.3)` 照样放行；`dream_min_quality` 却已经拒绝它，两套标准互相打脸。
+
+### 判据
+
+- `_call_name` 不再截断到 6 字符：「叫 getUserInfo」「叫 getUserList」原来都取到 `getUse`，
+  被判同名直接合并。现在收整词（含 `_ . -`），且长度 < 2、含 `/ \ :` 一律不参与同名判定。
+- `distance_to_similarity()`：vec0 的 L2 距离改为余弦等价 `1 - d²/2`。
+  原来 `1/(1+d)` 让最不像的一对（d=2）还有 0.33，配 `vec_min_similarity=0.10` 等于不过滤。
+
+### 规模
+
+- 纯 Python / numpy 暴力检索改为**分块扫描**（chunk=1000，新记忆优先）。
+  `pure_fallback_max_atoms` 的语义从「只看最老这么多条」改为「单次最多扫这么多条」，
+  5000 条以上不再静默丢失新记忆。
+- `enable_numpy_fallback` 真正接线（原来改了没反应）。
+
+### 移除的无效配置
+
+`commit_batch`、`raise_on_llm_error`、`max_candidates_per_ingest`、`numpy_fallback_max_atoms` ——
+四个在代码里零引用，改了不起作用。现在传进来会明确抛 `ConfigError: 未知配置项`。
+
 ## v1.0.0 —— 2026-10-27
 
 > 注：`pyproject.toml` 的 version 仍为 `0.1.0.dev1`，与本节版本号不一致，下次发版统一。
