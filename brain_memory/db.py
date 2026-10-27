@@ -34,7 +34,7 @@ from .gate import RuleGate
 from .locks import GlobalLock, WritePriorityRWLock, _LockBase
 from .promote import promote_candidate
 from .recall import search as recall_search
-from .types import DEFAULT_ROLE, ROLES, SIGNALS, Memory, Stats, utc_now
+from .types import DEFAULT_ROLE, FACT_TYPES, ROLES, SIGNALS, Memory, Stats, utc_now
 from .vec import VectorStore, resolve_embedder
 
 logger = logging.getLogger("brain_memory")
@@ -790,7 +790,11 @@ class MemoryDB:
         if session_id:
             sql += " AND e.session_id = ?"
             params.append(session_id)
-        sql += " ORDER BY a.quality DESC, a.id DESC LIMIT ?"
+        sql += (" ORDER BY a.quality DESC, a.id ASC LIMIT ?")
+        # 2026-10-27：id 从 DESC 改 ASC。
+        # 原来同质量时取最新的，结果最近的垃圾（「爱玩梗」「复读机」）
+        # 把早期的核心事实（名字、爱好）全挤出了 12 条预算。
+        # 早期建立的通常是真正的身份信息，越后面越是口水话。
         params.append(max(1, int(limit)))
 
         out: list[Memory] = []
@@ -818,6 +822,87 @@ class MemoryDB:
                 )
             )
         return out
+
+    def remember(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        fact_type: str = "fact",
+        confidence: float = 0.8,
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        """应用层已确认的事实：**跳过门控**直接进 L1 -> L2。
+
+        和 ingest 的区别：ingest 要靠门控判断「这句话值不值得记」，
+        remember 是调用方已经知道这是事实（比如模型压缩出来的摘要条目
+        「在杭州」「有只猫叫豆豆」），不该再被「太短/像闲聊」挡掉。
+        raw_events 照常落盘，溯源链不断。
+        """
+        self._ensure_open()
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError("session_id 必须是非空字符串")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("content 必须是非空字符串")
+        if fact_type not in FACT_TYPES:
+            fact_type = "fact"
+        text = content.strip()
+        ts = utc_now()
+        meta_json = None
+        if meta is not None:
+            try:
+                meta_json = json.dumps(meta, ensure_ascii=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("meta 必须可 JSON 序列化") from exc
+
+        with self._write_tx() as conn:
+            cur = conn.execute(
+                "INSERT INTO raw_events(session_id, role, content, meta_json, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (session_id.strip(), "user", text, meta_json, ts),
+            )
+            event_id = int(cur.lastrowid)
+            conn.execute(
+                "INSERT OR IGNORE INTO candidates(raw_event_id, fact_type, content, status, "
+                "confidence, created_at) VALUES (?,?,?,'pending',?,?)",
+                (event_id, fact_type, text, confidence, ts),
+            )
+            row = conn.execute(
+                "SELECT id FROM candidates WHERE raw_event_id = ? AND fact_type = ? AND content = ?",
+                (event_id, fact_type, text),
+            ).fetchone()
+            if row is None:
+                return event_id
+
+            cand = {
+                "id": int(row[0]),
+                "raw_event_id": event_id,
+                "fact_type": fact_type,
+                "content": text,
+                "confidence": confidence,
+                "entity_hint": None,
+            }
+            status, atom_id = promote_candidate(conn, self._cfg, cand)
+            now = utc_now()
+            if status == "rejected":
+                conn.execute(
+                    "UPDATE candidates SET status = 'rejected', resolved_at = ? WHERE id = ?",
+                    (now, cand["id"]),
+                )
+            elif status == "merged":
+                conn.execute(
+                    "UPDATE candidates SET status = 'merged', resolved_at = ? WHERE id = ?",
+                    (now, cand["id"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE candidates SET status = 'promoted', resolved_at = ? WHERE id = ?",
+                    (now, cand["id"]),
+                )
+                if atom_id is not None and self._vectors is not None:
+                    self._vectors.index_atom(conn, atom_id, text)
+                self._journal(conn, "promote", "atoms", atom_id, {"candidate_id": cand["id"], "via": "remember"})
+            return event_id
 
     def forget(
         self,

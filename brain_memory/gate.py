@@ -156,6 +156,25 @@ def _has_signal_hint(text: str) -> bool:
 # ---------------------------------------------------------------- 规则主体
 
 
+
+# 疑问句不是事实：问「我喜欢玩什么游戏」不代表「喜欢玩什么游戏」是偏好。
+# 实测这类问句收进 L2 后，下一轮注入 system prompt，
+# 模型会把问题当已知事实复述，反而更乱。
+_QUESTION_TAIL = ("吗", "呢", "么", "什么", "怎么", "哪儿", "哪里",
+                  "几点", "多少", "为什么", "是不是", "有没有", "能不能")
+
+
+def _is_question(text: str) -> bool:
+    """判断是不是一句问话。只认句尾特征，避免误伤「别问那么多」这种陈述。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t[-1] in "?？":
+        return True
+    tail = t[-8:]
+    return any(k in tail for k in _QUESTION_TAIL)
+
+
 def _hard_reject(text: str, cfg: MemoryConfig) -> str | None:
     core = text.strip()
     if len(core) < cfg.gate_min_chars:
@@ -172,6 +191,8 @@ def _hard_reject(text: str, cfg: MemoryConfig) -> str | None:
         return "log_line"
     if _is_repetition(core):
         return "repetition"
+    if _is_question(core):
+        return "question"
 
     stripped = _strip_punct(core)
     if stripped in GREETING_TOKENS:

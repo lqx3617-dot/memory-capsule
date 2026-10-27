@@ -29,7 +29,33 @@ _STOP_ENTITY = {
 
 # 实体名里出现这些字，基本可以断定是把半句话当名词了
 _BAD_ENTITY_CHARS = set("的了是在和与或把被让给从对为要用能不要把没很更最都也就还才你我他它这那")
-_MIN_ATOM_CHARS = 6
+_MIN_ATOM_CHARS = 2
+
+
+
+# 称呼类事实的归一（2026-10-27）。
+# 实测库里同一个信息存了 4 遍：「叫老李」「喊他老李」「对方叫老李」「昵称/称呼是老李」。
+# 它们的字符串相似度只有 0.31~0.57，卡在 0.9 的阈值下永远合并不了。
+# 但语义上是同一件事 —— 只要「称呼动词 + 同一个人名」就对上了。
+_CALL_RE = re.compile(r"(?:叫|喊|称呼|昵称|名字是|姓名|外号)[\s（(]?([\u4e00-\u9fa5A-Za-z]{1,6})")
+# 数字冲突检测：「十点下班」vs「九点下班」相似度 0.857，会被纯字符串判成重复，
+# 但它们是两条互相矛盾的事实，合并了等于把用户的话改掉。
+_NUM_RE = re.compile(r"[0-9]+|[一二三四五六七八九十百千]+(?=[点号月岁次个分时天周年])")
+
+
+def _call_name(text: str) -> str:
+    m = _CALL_RE.search(text or "")
+    if not m:
+        return ""
+    name = m.group(1)
+    # 去掉动词后可能跟的虚词：「喊他老李」->「老李」「称呼是老李」->「老李」
+    for w in ("是他", "是她", "是", "他", "她", "了", "成"):
+        if name.startswith(w):
+            name = name[len(w):]
+    return name
+
+def _numbers(text: str) -> set:
+    return set(_NUM_RE.findall(text or ""))
 
 
 def normalize(text: str) -> str:
@@ -116,8 +142,20 @@ def check_duplicate(
     ).fetchall()
     best_id: int | None = None
     best_sim = 0.0
+    _cname = _call_name(content)
+    _cnums = _numbers(content)
     for row in rows:
-        sim = similarity(content, str(row[1]))
+        _other = str(row[1])
+        # 规则一：称呼同一个人 → 直接视为重复（不管字符串像不像）
+        _oname = _call_name(_other)
+        if _cname and _oname and _cname == _oname:
+            return int(row[0]), 1.0
+        sim = similarity(content, _other)
+        # 规则二：两条都带数字且完全不相交 → 不可能重复
+        # （「十点下班」和「九点下班」相似度 0.857，必须挡住）
+        _onums = _numbers(_other)
+        if _cnums and _onums and not (_cnums & _onums):
+            continue
         if sim > best_sim:
             best_sim, best_id = sim, int(row[0])
     if best_id is not None and best_sim >= cfg.dedup_similarity:

@@ -1,18 +1,13 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+dist/
+build/
 .venv/
 venv/
-
-# 运行时产物
 *.db
 *.db-wal
 *.db-shm
-DREAMS.md
-bm_*/
-douyin_agent_*/
-
-# 编辑器
-.vscode/
-.idea/
+*.log
 .DS_Store
+.env
