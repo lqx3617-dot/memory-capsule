@@ -6,7 +6,10 @@
 库一过 pure_fallback_max_atoms 就永久失忆 —— 本测试用 cap=3 + 8 条原子钉死它。
 """
 import sqlite3
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from brain_memory.config import MemoryConfig
 from brain_memory.vec import HashEmbedder, VectorStore, pack_vector

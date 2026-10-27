@@ -8,7 +8,10 @@
   C. 真疑问句 —— 必须被拒，且 reason 是 "question"。
 第一版测试把 B 也断言成 accepted，那是错的：门控的置信度阈值与疑问判定是两件事。
 """
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from brain_memory.config import MemoryConfig
 from brain_memory.gate import RuleGate

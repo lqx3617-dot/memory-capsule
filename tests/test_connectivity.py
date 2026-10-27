@@ -5,7 +5,10 @@
 原实现里 refs 统计的是 supersedes_id 引用数，而被引用者都是 superseded、
 根本进不了 forget 扫描，所以 connectivity 恒为 1 —— 因子是死的。
 """
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timedelta, timezone
 
 from brain_memory.config import MemoryConfig

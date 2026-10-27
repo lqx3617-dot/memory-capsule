@@ -5,7 +5,10 @@
 关键：只改 state 会失败 —— forget 会用 compute_quality 重算再打回 silent。
 本测试同时盯 state 和 recall 两个面。
 """
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import brain_memory as bm
 
