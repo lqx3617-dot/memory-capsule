@@ -1,5 +1,10 @@
 # 记忆胶囊
 
+[![test](https://github.com/lqx3617-dot/memory-capsule/actions/workflows/test.yml/badge.svg)](https://github.com/lqx3617-dot/memory-capsule/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+
 > 中文名：**记忆胶囊**　包名：`brain_memory`（`import brain_memory`，pip 名不变）
 
 可嵌入的长期记忆库。**纯 stdlib + sqlite3**，无 HTTP 服务、无 Redis、无模型权重、无 root 依赖。
