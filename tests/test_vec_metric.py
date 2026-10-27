@@ -3,8 +3,9 @@
 """vec0 距离换算：必须与余弦同一量纲，否则 vec_min_similarity 形同虚设。
 
 原实现 1/(1+distance)：最不像的一对（d=2）还有 0.33，阈值 0.10 什么都挡不住。
-归一化向量下 L2^2 = 2 - 2cos，等价换算应为 1 - d²/2。
-"""import os
+归一化向量下 L2^2 = 2 - 2cos，等价换算应为 1 - d*d/2。
+"""
+import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -4,7 +4,8 @@
 
 原正则 {1,6} 只取 6 个字符：「叫 getUserInfo」「叫 getUserList」都得到 getUse，
 check_duplicate 直接把它们当同一件事合并，丢一条事实。
-"""import os
+"""
+import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,7 +24,7 @@ def main() -> int:
     bad = 0
     for a, b in SAME:
         na, nb = _call_name(a), _call_name(b)
-        ok = na and na == nb
+        ok = bool(na) and na == nb
         print(("  [OK]   " if ok else "  [FAIL] ") + "同名 %r -> %r / %r" % (a, na, nb))
         bad += 0 if ok else 1
     for a, b in DIFF:
@@ -31,7 +32,6 @@ def main() -> int:
         ok = na != nb
         print(("  [OK]   " if ok else "  [FAIL] ") + "不同 %r -> %r / %r" % (a, na, nb))
         bad += 0 if ok else 1
-    # 单字 / 路径不许当称呼
     for text in ("这个按钮叫 /api/v2", "他叫李"):
         name = _call_name(text)
         ok = name == ""
