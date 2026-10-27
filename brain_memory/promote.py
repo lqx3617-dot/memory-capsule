@@ -42,7 +42,10 @@ _MIN_ATOM_CHARS = 2
 _CALL_RE = re.compile(
     r"(?:叫|喊|称呼|昵称|名字是|姓名|外号)[\s（(]?([\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9_.\-]{0,31})"
 )
-_CALL_STOP = ("是他", "是她", "是", "他", "她", "了", "成", "过", "着")
+# 按长度降序：先剥「名字是」再剥「是」，否则会把名字首字当虚词吃掉。
+# 「外号叫豆豆」这种双动词也会提取出「叫豆豆」，所以要连着剥。
+_CALL_STOP = ("名字是", "称呼", "昵称", "外号", "姓名", "是他", "是她",
+              "是", "他", "她", "叫", "喊", "了", "成", "过", "着")
 _CALL_MIN = 2
 # 数字冲突检测：「十点下班」vs「九点下班」相似度 0.857，会被纯字符串判成重复，
 # 但它们是两条互相矛盾的事实，合并了等于把用户的话改掉。
@@ -56,9 +59,14 @@ def _call_name(text: str) -> str:
         return ""
     name = m.group(1)
     # 去掉动词后可能跟的虚词：「喊他老李」->「老李」「称呼是老李」->「老李」
-    for w in _CALL_STOP:
-        if name.startswith(w):
-            name = name[len(w):]
+    changed = True
+    while changed:                       # 反复剥，直到剥不动（「叫」「是」可能连着出现）
+        changed = False
+        for w in _CALL_STOP:
+            if name.startswith(w) and len(name) > len(w):
+                name = name[len(w):]
+                changed = True
+                break
     name = name.strip(" .,-_:")
     if len(name) < _CALL_MIN:          # 单字名一律不参与「同名即重复」判定
         return ""
