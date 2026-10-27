@@ -49,7 +49,7 @@ brain_memory/
 ├── __init__.py     公开导出（Database / Config 是别名）
 ├── __main__.py     python -m brain_memory
 ├── cli.py          命令行
-├── config.py       MemoryConfig（62 个配置项）
+├── config.py       MemoryConfig（73 个配置项）
 ├── db.py           MemoryDB：连接 / PRAGMA / 锁 / 池 / flusher / 业务 API
 ├── errors.py       异常层级
 ├── types.py        Memory / Stats / ForgetDecision + 枚举
@@ -250,7 +250,7 @@ L0/L1 命中**不计访问计数** —— 它们不是 atom，没有 quality 可
 
 ```bash
 sh check.sh          # 静态扫描 + 语法 + 真建库体检
-sh check.sh --full   # 再加 _smoke / _test_t4 / _test_phase2 / embed_demo
+sh check.sh --full   # 再加 tests/test_smoke.py / tests/test_t4.py / tests/test_phase2.py / examples/embed_demo.py
 ```
 
 ```
@@ -266,7 +266,7 @@ sh check.sh --full   # 再加 _smoke / _test_t4 / _test_phase2 / embed_demo
   [OK]   busy_timeout = 5000 / temp_store = 2 / foreign_keys = 1
   [OK]   ingest -> recall 往返（event=1, hits=1）
 == 4/4 全量测试 ==
-  [OK]   _smoke.py / _test_t4.py / _test_phase2.py / examples/embed_demo.py
+  [OK]   tests/test_smoke.py / tests/test_t4.py / tests/test_phase2.py / examples/embed_demo.py
 == 汇总 ==
   全部通过
 ```
@@ -307,5 +307,5 @@ PRoot 下按 1.5–3 倍 I/O 放大估算，仍远低于 PLAN 的 ingest <50ms /
 
 - `sqlite-vec` 路径已实现但**本机无法实测**（Python 3.14 暂无对应 wheel），逻辑按官方 API 写，
   降级链路已实测。装得上的环境请跑一次 `sh check.sh --full` 复验。
-- escalation（L2→L1→L0 下探）仍只留判定钩子。
+- escalation（L2→L1→L0 下探）已实现且在 `tests/test_escalation.py` 有断言，默认 `enable_escalation=False`。
 - 哈希向量不是语义模型，真同义召回需配 `embedding_callable` 或 http 端点。

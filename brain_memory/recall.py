@@ -303,6 +303,7 @@ def search(
     match_expr = build_match_expr(text, db.fts_tokenizer)
     fts_ranked: list[int] = []
     vec_ranked: list[int] = []
+    vec_sims: dict[int, float] = {}
     rows_by_id: dict[int, dict] = {}
     used_fts = False
     used_vec = False
@@ -361,6 +362,7 @@ def search(
                 pairs = []
             if pairs:
                 used_vec = True
+                vec_sims.update({int(a): float(s) for a, s in pairs})
                 for atom_id, _sim in pairs:
                     vec_ranked.append(atom_id)
                 missing = [i for i in vec_ranked if i not in rows_by_id]
@@ -383,13 +385,12 @@ def search(
         ranked_items.sort(key=lambda item: item[1], reverse=True)
     elif vec_ranked:
         # 只有向量：用相似度本身，再乘一点 quality
-        sims = dict(vec_ranked and [(a, s) for a, s in zip(vec_ranked, [1.0] * len(vec_ranked))] or [])
-        for rank, atom_id in enumerate(vec_ranked, start=1):
+        for atom_id in vec_ranked:
             if atom_id not in rows_by_id:
                 continue
             quality = float(rows_by_id[atom_id].get("quality") or 0.0)
-            base = 1.0 / (1.0 + rank * 0.1)
-            ranked_items.append((atom_id, min(1.0, 0.75 * base + 0.25 * quality)))
+            sim = vec_sims.get(atom_id, 0.0)
+            ranked_items.append((atom_id, min(1.0, 0.8 * sim + 0.2 * quality)))
         ranked_items.sort(key=lambda item: item[1], reverse=True)
     else:
         # 只有 FTS：Phase 1 的打分（bm25 归一 + quality + recency）

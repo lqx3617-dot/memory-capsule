@@ -422,9 +422,9 @@ class MemoryDB:
         if self._closing or self._closed:
             raise ClosedError(f"MemoryDB 已关闭: {self._path}")
 
-    def _begin_op(self) -> None:
+    def _begin_op(self, allow_closing: bool = False) -> None:
         with self._state_lock:
-            if self._closed:
+            if self._closed or (self._closing and not allow_closing):
                 raise ClosedError(f"MemoryDB 已关闭: {self._path}")
             self._in_flight += 1
 
@@ -439,10 +439,10 @@ class MemoryDB:
         return self._cfg.busy_timeout_ms / 1000.0
 
     @contextmanager
-    def _write_tx(self) -> Iterator[sqlite3.Connection]:
+    def _write_tx(self, allow_closing: bool = False) -> Iterator[sqlite3.Connection]:
         """写事务：单写连接 + 写锁 + BEGIN IMMEDIATE / COMMIT / ROLLBACK。"""
         assert self._sync is not None and self._writer is not None
-        self._begin_op()
+        self._begin_op(allow_closing=allow_closing)
         try:
             with self._sync.write(self._lock_timeout()):
                 conn = self._writer
@@ -536,7 +536,7 @@ class MemoryDB:
         self._ensure_open()
         return self._flush_access_internal()
 
-    def _flush_access_internal(self) -> int:
+    def _flush_access_internal(self, allow_closing: bool = False) -> int:
         with self._access_lock:
             if not self._access_delta:
                 return 0
@@ -545,7 +545,7 @@ class MemoryDB:
         now = utc_now()
         rows = [(int(times), now, int(atom_id)) for atom_id, times in delta.items()]
         try:
-            with self._write_tx() as conn:
+            with self._write_tx(allow_closing=allow_closing) as conn:
                 conn.executemany(
                     "UPDATE atoms SET access_count = access_count + ?, "
                     "last_accessed_at = ? WHERE id = ?",
@@ -929,7 +929,7 @@ class MemoryDB:
         return [d.as_dict() for d in decisions]
 
     def dream(self, *, persist: bool = True, max_atoms: int | None = None) -> str:
-        """执行一次巩固。Phase 1 是桩：只统计 + 写 journal，返回 Markdown 文本。"""
+        """执行一次巩固：聚类高质量原子 -> L3 实体页 + DREAMS.md，返回 Markdown 文本。"""
         self._ensure_open()
         return dream_impl(self, persist=persist, max_atoms=max_atoms)
 
@@ -1087,7 +1087,8 @@ class MemoryDB:
                     try:
                         row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                         if row is not None and len(row) >= 2:
-                            result["checkpointed_pages"] = int(row[1])
+                            # PRAGMA wal_checkpoint 返回 (busy, log_frames, checkpointed_frames)
+                            result["checkpointed_pages"] = int(row[2]) if len(row) > 2 else int(row[1])
                     except sqlite3.Error as exc:
                         logger.warning("记忆胶囊: wal_checkpoint 失败: %s", exc)
 
@@ -1139,7 +1140,7 @@ class MemoryDB:
                 self._flusher.join(timeout=max(0.1, timeout))
 
             try:
-                flushed = self._flush_access_internal()
+                flushed = self._flush_access_internal(allow_closing=True)
                 if flushed:
                     logger.info("记忆胶囊: close 前刷入 %d 条访问计数", flushed)
             except Exception as exc:

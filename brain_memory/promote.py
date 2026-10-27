@@ -168,6 +168,7 @@ def check_conflict(
 ) -> tuple[int | None, float]:
     """同 fact_type、否定极性相反、正文相似度 >= 0.55 视为冲突。"""
     mine = polarity(content)
+    mine_nums = _numbers(content)
     rows = conn.execute(
         "SELECT id, content FROM atoms WHERE fact_type = ? AND state = 'active' "
         "ORDER BY id DESC LIMIT 50",
@@ -177,7 +178,13 @@ def check_conflict(
     best_sim = 0.0
     for row in rows:
         other = str(row[1])
+        other_nums = _numbers(other)
         if polarity(other) == mine:
+            # 极性相同、句干相似、数字完全不相交 -> 是被改写过的旧事实（原实现的漏杀侧）
+            if mine_nums and other_nums and not (mine_nums & other_nums):
+                stem = similarity(_NUM_RE.sub("#", content), _NUM_RE.sub("#", other))
+                if stem >= 0.6:
+                    return int(row[0]), stem
             continue
         sim = similarity(content, other)
         if sim >= 0.55 and sim > best_sim:
@@ -207,11 +214,27 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
 
     dup_id, _dup_sim = check_duplicate(conn, content, fact_type, cfg)
     if dup_id is not None:
+        now = utc_now()
         conn.execute(
-            "UPDATE atoms SET confidence = MAX(confidence, ?), quality = MAX(quality, 0.6) "
+            "UPDATE atoms SET confidence = MAX(confidence, ?), quality = MAX(quality, ?) "
             "WHERE id = ?",
-            (confidence, dup_id),
+            (confidence, confidence, dup_id),
         )
+        row = conn.execute("SELECT state FROM atoms WHERE id = ?", (dup_id,)).fetchone()
+        if row is not None and str(row[0]) == "silent":
+            # 用户又把这句话说了一遍 = 这条记忆还活着。
+            # 只改 state 没用：forget 会用 compute_quality 现场重算再打回 silent，
+            # 所以同时把 feedback 抬到 useful、last_accessed_at 推到当下（decay 归 1）。
+            conn.execute(
+                "UPDATE atoms SET state = 'active', state_changed_at = ?, "
+                "feedback = MAX(feedback, ?), last_accessed_at = ? WHERE id = ?",
+                (now, cfg.feedback_useful, now, dup_id),
+            )
+            conn.execute(
+                "INSERT INTO journal(action, target_table, target_id, detail_json, created_at) "
+                "VALUES ('revive', 'atoms', ?, ?, ?)",
+                (dup_id, '{"via":"dedup_merge"}', now),
+            )
         return "merged", dup_id
 
     conflict_id, _conflict_sim = check_conflict(conn, content, fact_type, cfg)

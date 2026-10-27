@@ -333,12 +333,14 @@ class VectorStore:
             return False
         if self.backend == "sqlite-vec":
             try:
+                conn.execute("DELETE FROM atoms_vec WHERE atom_id = ?", (atom_id,))
                 conn.execute(
-                    "INSERT OR REPLACE INTO atoms_vec(atom_id, embedding) VALUES (?, ?)",
+                    "INSERT INTO atoms_vec(atom_id, embedding) VALUES (?, ?)",
                     (atom_id, json.dumps(vec)),
                 )
             except Exception as exc:
                 self.last_error = "写 vec0 失败: " + str(exc)
+                self._note_failure(self.last_error)
         return True
 
     # ---- 检索 ----
@@ -382,7 +384,8 @@ class VectorStore:
         try:
             rows = conn.execute(
                 "SELECT id, embedding FROM atoms "
-                "WHERE embedding IS NOT NULL AND state = 'active' LIMIT ?",
+                "WHERE embedding IS NOT NULL AND state = 'active' "
+                "ORDER BY id DESC LIMIT ?",
                 (cap,),
             ).fetchall()
         except Exception as exc:
@@ -395,18 +398,19 @@ class VectorStore:
         if self._numpy is not None:
             try:
                 np = self._numpy
-                mat = np.zeros((len(rows), len(qvec)), dtype="float32")
                 ids: list[int] = []
-                for i, row in enumerate(rows):
+                vecs: list[list[float]] = []
+                for row in rows:
                     vec = unpack_vector(row[1])
                     if len(vec) != len(qvec):
-                        continue
-                    mat[i] = np.asarray(vec, dtype="float32")
+                        continue            # 维度不一致直接丢，绝不留零行占位
                     ids.append(int(row[0]))
+                    vecs.append(vec)
                 if not ids:
                     return []
+                mat = np.asarray(vecs, dtype="float32")   # 行数 == len(ids)，不会错位
                 q = np.asarray(qvec, dtype="float32")
-                sims = mat[: len(ids)] @ q
+                sims = mat @ q
                 order = sims.argsort()[::-1][: int(limit)]
                 return [(ids[int(i)], float(sims[int(i)])) for i in order]
             except Exception as exc:
