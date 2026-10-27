@@ -277,10 +277,12 @@ sh check.sh --full   # 再加 _smoke / _test_t4 / _test_phase2 / embed_demo
 
 | 文件 | 内容 |
 |---|---|
-| `AGENT_RULES.md` | 项目硬约束（原始规则） |
-| `PLAN.md` | 实施计划、schema、并发模型、验收映射 |
-| `PUBLIC_API.md` | API 契约、异常、降级总表、不变量 |
-| `EMBEDDING.md` | App 集成最佳实践 |
+| [`AGENT_RULES.md`](docs/AGENT_RULES.md) | 项目硬约束（原始规则） |
+| [`PLAN.md`](docs/PLAN.md) | 实施计划、schema、并发模型、验收映射 |
+| [`PUBLIC_API.md`](docs/PUBLIC_API.md) | API 契约、异常、降级总表、不变量 |
+| [`EMBEDDING.md`](docs/EMBEDDING.md) | App 集成最佳实践 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南与设计红线 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 版本记录 |
 
 ---
 
