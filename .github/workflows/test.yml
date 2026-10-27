@@ -1,0 +1,60 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Show environment
+        run: |
+          python -V
+          python -c "import sqlite3; print('sqlite', sqlite3.sqlite_version)"
+          python -c "import sqlite3; c=sqlite3.connect(':memory:'); print('fts5', bool(c.execute(\"SELECT 1 FROM pragma_compile_options WHERE compile_options='ENABLE_FTS5'\").fetchone()))"
+
+      - name: Static scan
+        run: python tests/selfcheck.py --step scan
+
+      - name: Doc code blocks
+        run: python tests/doccheck.py
+
+      - name: Compile all
+        run: python -m compileall -q brain_memory examples app_integration.py 记忆胶囊.py
+
+      - name: DB doctor
+        run: python tests/selfcheck.py --step doctor
+
+      - name: Smoke test
+        run: python tests/test_smoke.py
+
+      - name: T4 test
+        run: python tests/test_t4.py
+
+      - name: Phase2 test
+        run: python tests/test_phase2.py
+
+      - name: Escalation test
+        run: python tests/test_escalation.py
+
+      - name: Integration demo
+        run: python examples/embed_demo.py
+
+      - name: Full check.sh
+        run: sh check.sh --full
