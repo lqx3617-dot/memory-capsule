@@ -50,7 +50,7 @@ def _entity_names(conn) -> dict[int, str]:
 
 
 def _build_page(title: str, kind: str, members: list[dict[str, Any]]) -> str:
-    label = "%d 条" % len(members) if title == kind else "%s，%d 条" % (kind, len(members))
+    label = "%d 条" % len(members) if kind == "entity" else "%s，%d 条" % (kind, len(members))
     lines = ["## %s（%s）" % (title, label), ""]
     for item in members:
         content = item["content"].replace("\n", " ")
@@ -72,7 +72,7 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
         names = _entity_names(conn)
         rows = conn.execute(
             "SELECT id, content, entity_id, fact_type, quality, confidence, "
-            "feedback, created_at, last_accessed_at FROM atoms "
+            "feedback, access_count, created_at, last_accessed_at FROM atoms "
             "WHERE state = 'active' ORDER BY quality DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -85,6 +85,7 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
             fact_type=str(row["fact_type"]),
             last_active=parse_utc(row["last_accessed_at"]) or parse_utc(row["created_at"]),
             now=now_dt,
+            access_count=int(row["access_count"]),
         )
         if quality < cfg.dream_min_quality:
             continue

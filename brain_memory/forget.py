@@ -42,6 +42,7 @@ def compute_quality(
     last_active: datetime | None,
     now: datetime | None = None,
     refs: int = 0,
+    access_count: int = 0,
 ) -> float:
     now = now or datetime.now(timezone.utc)
     if last_active is None:
@@ -49,7 +50,7 @@ def compute_quality(
     else:
         age_days = max(0.0, (now - last_active).total_seconds() / 86400.0)
         decay = 0.5 ** (age_days / half_life_days(cfg, fact_type))
-    connectivity = 1.0 + math.log2(1.0 + max(0, refs))
+    connectivity = 1.0 + math.log2(1.0 + max(0, refs) + max(0, access_count))
     quality = feedback * decay * connectivity
     return max(0.0, min(1.0, quality))
 
@@ -120,6 +121,7 @@ def scan(
                 last_active=last,
                 now=now,
                 refs=refs.get(int(row["id"]), 0),
+                access_count=int(row["access_count"]),
             )
             action, reason = classify(cfg, quality, int(row["access_count"]))
             if action == "keep":

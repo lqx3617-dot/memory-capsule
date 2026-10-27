@@ -33,7 +33,7 @@ from .forget import apply as forget_apply, scan as forget_scan, unlink as forget
 from .gate import RuleGate
 from .locks import GlobalLock, WritePriorityRWLock, _LockBase
 from .promote import promote_candidate
-from .recall import search as recall_search
+from .recall import live_quality, search as recall_search
 from .types import DEFAULT_ROLE, FACT_TYPES, ROLES, SIGNALS, Memory, Stats, utc_now
 from .vec import VectorStore, resolve_embedder
 
@@ -422,9 +422,9 @@ class MemoryDB:
         if self._closing or self._closed:
             raise ClosedError(f"MemoryDB 已关闭: {self._path}")
 
-    def _begin_op(self) -> None:
+    def _begin_op(self, allow_closing: bool = False) -> None:
         with self._state_lock:
-            if self._closed:
+            if self._closed or (self._closing and not allow_closing):
                 raise ClosedError(f"MemoryDB 已关闭: {self._path}")
             self._in_flight += 1
 
@@ -439,10 +439,10 @@ class MemoryDB:
         return self._cfg.busy_timeout_ms / 1000.0
 
     @contextmanager
-    def _write_tx(self) -> Iterator[sqlite3.Connection]:
+    def _write_tx(self, allow_closing: bool = False) -> Iterator[sqlite3.Connection]:
         """写事务：单写连接 + 写锁 + BEGIN IMMEDIATE / COMMIT / ROLLBACK。"""
         assert self._sync is not None and self._writer is not None
-        self._begin_op()
+        self._begin_op(allow_closing=allow_closing)
         try:
             with self._sync.write(self._lock_timeout()):
                 conn = self._writer
@@ -536,7 +536,7 @@ class MemoryDB:
         self._ensure_open()
         return self._flush_access_internal()
 
-    def _flush_access_internal(self) -> int:
+    def _flush_access_internal(self, allow_closing: bool = False) -> int:
         with self._access_lock:
             if not self._access_delta:
                 return 0
@@ -545,7 +545,7 @@ class MemoryDB:
         now = utc_now()
         rows = [(int(times), now, int(atom_id)) for atom_id, times in delta.items()]
         try:
-            with self._write_tx() as conn:
+            with self._write_tx(allow_closing=allow_closing) as conn:
                 conn.executemany(
                     "UPDATE atoms SET access_count = access_count + ?, "
                     "last_accessed_at = ? WHERE id = ?",
@@ -778,11 +778,13 @@ class MemoryDB:
         self._ensure_open()
         sql = (
             "SELECT a.id, a.content, a.source_event_id, a.confidence, a.quality, "
-            "a.fact_type, a.entity_id, a.access_count, a.created_at, a.last_accessed_at "
+            "a.fact_type, a.entity_id, a.access_count, a.feedback, "
+            "a.created_at, a.last_accessed_at "
             "FROM atoms a LEFT JOIN raw_events e ON e.id = a.source_event_id "
-            "WHERE a.state = 'active' AND a.quality >= ?"
+            "WHERE a.state = 'active'"
         )
-        params: list[Any] = [float(min_quality)]
+        # min_quality 不放进 SQL：存储的 quality 是写入快照，现算值才代表「现在值多少」。
+        params: list[Any] = []
         types = [t for t in (fact_types or []) if t]
         if types:
             sql += " AND a.fact_type IN (" + ",".join("?" * len(types)) + ")"
@@ -795,7 +797,7 @@ class MemoryDB:
         # 原来同质量时取最新的，结果最近的垃圾（「爱玩梗」「复读机」）
         # 把早期的核心事实（名字、爱好）全挤出了 12 条预算。
         # 早期建立的通常是真正的身份信息，越后面越是口水话。
-        params.append(max(1, int(limit)))
+        params.append(max(1, int(limit)) * 4)
 
         out: list[Memory] = []
         try:
@@ -803,20 +805,32 @@ class MemoryDB:
                 rows = conn.execute(sql, tuple(params)).fetchall()
         except sqlite3.Error as exc:
             raise DatabaseError(f"facts 查询失败: {exc}") from exc
+        ranked: list[tuple[float, dict[str, Any]]] = []
         for row in rows:
+            item = dict(row)
+            ranked.append((live_quality(self._cfg, item), item))
+        ranked.sort(key=lambda it: (-it[0], int(it[1]["id"])))
+
+        floor = float(min_quality)
+        cap = max(1, int(limit))
+        for quality, row in ranked:
+            if quality < floor:
+                continue
+            if len(out) >= cap:
+                break
             out.append(
                 Memory(
                     atom_id=int(row["id"]),
                     content=str(row["content"]),
                     source_event_id=row["source_event_id"],
                     confidence=float(row["confidence"] or 0.0),
-                    quality=float(row["quality"] or 0.0),
+                    quality=quality,
                     fact_type=str(row["fact_type"] or "fact"),
                     entity_id=row["entity_id"],
                     access_count=int(row["access_count"] or 0),
                     created_at=row["created_at"],
                     last_accessed_at=row["last_accessed_at"],
-                    score=float(row["quality"] or 0.0),
+                    score=quality,
                     layer="L2",
                     record_id=int(row["id"]),
                 )
@@ -929,7 +943,7 @@ class MemoryDB:
         return [d.as_dict() for d in decisions]
 
     def dream(self, *, persist: bool = True, max_atoms: int | None = None) -> str:
-        """执行一次巩固。Phase 1 是桩：只统计 + 写 journal，返回 Markdown 文本。"""
+        """执行一次巩固：聚类高质量原子 -> L3 实体页 + DREAMS.md，返回 Markdown 文本。"""
         self._ensure_open()
         return dream_impl(self, persist=persist, max_atoms=max_atoms)
 
@@ -1087,7 +1101,8 @@ class MemoryDB:
                     try:
                         row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                         if row is not None and len(row) >= 2:
-                            result["checkpointed_pages"] = int(row[1])
+                            # PRAGMA wal_checkpoint 返回 (busy, log_frames, checkpointed_frames)
+                            result["checkpointed_pages"] = int(row[2]) if len(row) > 2 else int(row[1])
                     except sqlite3.Error as exc:
                         logger.warning("记忆胶囊: wal_checkpoint 失败: %s", exc)
 
@@ -1139,7 +1154,7 @@ class MemoryDB:
                 self._flusher.join(timeout=max(0.1, timeout))
 
             try:
-                flushed = self._flush_access_internal()
+                flushed = self._flush_access_internal(allow_closing=True)
                 if flushed:
                     logger.info("记忆胶囊: close 前刷入 %d 条访问计数", flushed)
             except Exception as exc:

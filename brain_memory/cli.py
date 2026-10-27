@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats = sub.add_parser("stats", help="打印各层计数与降级状态")
     p_stats.add_argument("--json", action="store_true")
 
-    p_dream = sub.add_parser("dream", help="执行一次巩固（Phase 1 是桩）")
+    p_dream = sub.add_parser("dream", help="执行一次巩固（生成 L3 实体页 + DREAMS.md）")
     p_dream.add_argument("--no-persist", action="store_true")
     p_dream.add_argument("--max-atoms", type=int, default=None)
 

@@ -160,19 +160,37 @@ def _has_signal_hint(text: str) -> bool:
 # 疑问句不是事实：问「我喜欢玩什么游戏」不代表「喜欢玩什么游戏」是偏好。
 # 实测这类问句收进 L2 后，下一轮注入 system prompt，
 # 模型会把问题当已知事实复述，反而更乱。
-_QUESTION_TAIL = ("吗", "呢", "么", "什么", "怎么", "哪儿", "哪里",
-                  "几点", "多少", "为什么", "是不是", "有没有", "能不能")
+# 陈述/祈使优先：句子里一旦出现这些词，就不当问句处理。
+# 原实现扫「句尾 8 字」并含单字「么」，导致
+# 「代码风格必须这么写」「不要问我为什么」「没什么好商量的」全被硬拒。
+_ASSERTIVE = ("必须", "不能", "不要", "别", "不用", "禁止", "只能", "统一",
+              "决定", "记得", "务必", "一定要", "不管", "无论", "宁愿")
+# 明确疑问构式：几乎不用于陈述，优先于 _ASSERTIVE 判定
+_Q_PATTERNS = ("哪个", "哪些", "哪种", "是不是", "要不要", "行不行",
+               "好不好", "可不可以", "有没有")
+# 以疑问词开头的句子，即使后半句带「不用/别」也仍然是问句
+_WH_FIRST = ("为什么", "怎么", "哪", "什么", "多少", "是否")
+_TAIL_QUESTION = ("吗", "呢", "么")
+_END_QUESTION = ("什么", "怎么", "哪儿", "哪里", "几点", "多少",
+                 "为什么", "是不是", "有没有", "能不能")
 
 
 def _is_question(text: str) -> bool:
-    """判断是不是一句问话。只认句尾特征，避免误伤「别问那么多」这种陈述。"""
+    """判断是不是一句问话。判定顺序：问号 > 疑问构式 > 疑问词开头 > 断言词 > 句尾特征。"""
     t = (text or "").strip()
     if not t:
         return False
     if t[-1] in "?？":
         return True
-    tail = t[-8:]
-    return any(k in tail for k in _QUESTION_TAIL)
+    if any(p in t for p in _Q_PATTERNS):
+        return True
+    if t.startswith(_WH_FIRST):
+        return True
+    if any(w in t for w in _ASSERTIVE):
+        return False
+    if t[-3:].endswith(_TAIL_QUESTION):
+        return True
+    return any(t.endswith(w) for w in _END_QUESTION)
 
 
 def _hard_reject(text: str, cfg: MemoryConfig) -> str | None:

@@ -37,21 +37,41 @@ _MIN_ATOM_CHARS = 2
 # 实测库里同一个信息存了 4 遍：「叫老李」「喊他老李」「对方叫老李」「昵称/称呼是老李」。
 # 它们的字符串相似度只有 0.31~0.57，卡在 0.9 的阈值下永远合并不了。
 # 但语义上是同一件事 —— 只要「称呼动词 + 同一个人名」就对上了。
-_CALL_RE = re.compile(r"(?:叫|喊|称呼|昵称|名字是|姓名|外号)[\s（(]?([\u4e00-\u9fa5A-Za-z]{1,6})")
+# 2026-10-27：{1,6} 会截断长标识符 —— 「叫 getUserInfo」「叫 getUserList」
+# 都只取到 "getUse"，被判成同一个人。改成收整词（含 _ . - 等标识符字符）。
+_CALL_RE = re.compile(
+    r"(?:叫|喊|称呼|昵称|名字是|姓名|外号)[\s（(]?([\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9_.\-]{0,31})"
+)
+# 按长度降序：先剥「名字是」再剥「是」，否则会把名字首字当虚词吃掉。
+# 「外号叫豆豆」这种双动词也会提取出「叫豆豆」，所以要连着剥。
+_CALL_STOP = ("名字是", "称呼", "昵称", "外号", "姓名", "是他", "是她",
+              "是", "他", "她", "叫", "喊", "了", "成", "过", "着")
+_CALL_MIN = 2
 # 数字冲突检测：「十点下班」vs「九点下班」相似度 0.857，会被纯字符串判成重复，
 # 但它们是两条互相矛盾的事实，合并了等于把用户的话改掉。
 _NUM_RE = re.compile(r"[0-9]+|[一二三四五六七八九十百千]+(?=[点号月岁次个分时天周年])")
 
 
 def _call_name(text: str) -> str:
+    """提取称呼名。宁可返回空，也不返回一个会误合并的短串。"""
     m = _CALL_RE.search(text or "")
     if not m:
         return ""
     name = m.group(1)
     # 去掉动词后可能跟的虚词：「喊他老李」->「老李」「称呼是老李」->「老李」
-    for w in ("是他", "是她", "是", "他", "她", "了", "成"):
-        if name.startswith(w):
-            name = name[len(w):]
+    changed = True
+    while changed:                       # 反复剥，直到剥不动（「叫」「是」可能连着出现）
+        changed = False
+        for w in _CALL_STOP:
+            if name.startswith(w) and len(name) > len(w):
+                name = name[len(w):]
+                changed = True
+                break
+    name = name.strip(" .,-_:")
+    if len(name) < _CALL_MIN:          # 单字名一律不参与「同名即重复」判定
+        return ""
+    if any(ch in name for ch in "/\\:"):   # 路径 / 协议头不是称呼
+        return ""
     return name
 
 def _numbers(text: str) -> set:
@@ -148,7 +168,7 @@ def check_duplicate(
         _other = str(row[1])
         # 规则一：称呼同一个人 → 直接视为重复（不管字符串像不像）
         _oname = _call_name(_other)
-        if _cname and _oname and _cname == _oname:
+        if _cname and _oname and _cname == _oname and len(_cname) >= _CALL_MIN:
             return int(row[0]), 1.0
         sim = similarity(content, _other)
         # 规则二：两条都带数字且完全不相交 → 不可能重复
@@ -168,6 +188,7 @@ def check_conflict(
 ) -> tuple[int | None, float]:
     """同 fact_type、否定极性相反、正文相似度 >= 0.55 视为冲突。"""
     mine = polarity(content)
+    mine_nums = _numbers(content)
     rows = conn.execute(
         "SELECT id, content FROM atoms WHERE fact_type = ? AND state = 'active' "
         "ORDER BY id DESC LIMIT 50",
@@ -177,7 +198,13 @@ def check_conflict(
     best_sim = 0.0
     for row in rows:
         other = str(row[1])
+        other_nums = _numbers(other)
         if polarity(other) == mine:
+            # 极性相同、句干相似、数字完全不相交 -> 是被改写过的旧事实（原实现的漏杀侧）
+            if mine_nums and other_nums and not (mine_nums & other_nums):
+                stem = similarity(_NUM_RE.sub("#", content), _NUM_RE.sub("#", other))
+                if stem >= 0.6:
+                    return int(row[0]), stem
             continue
         sim = similarity(content, other)
         if sim >= 0.55 and sim > best_sim:
@@ -207,11 +234,27 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
 
     dup_id, _dup_sim = check_duplicate(conn, content, fact_type, cfg)
     if dup_id is not None:
+        now = utc_now()
         conn.execute(
-            "UPDATE atoms SET confidence = MAX(confidence, ?), quality = MAX(quality, 0.6) "
+            "UPDATE atoms SET confidence = MAX(confidence, ?), quality = MAX(quality, ?) "
             "WHERE id = ?",
-            (confidence, dup_id),
+            (confidence, confidence, dup_id),
         )
+        row = conn.execute("SELECT state FROM atoms WHERE id = ?", (dup_id,)).fetchone()
+        if row is not None and str(row[0]) == "silent":
+            # 用户又把这句话说了一遍 = 这条记忆还活着。
+            # 只改 state 没用：forget 会用 compute_quality 现场重算再打回 silent，
+            # 所以同时把 feedback 抬到 useful、last_accessed_at 推到当下（decay 归 1）。
+            conn.execute(
+                "UPDATE atoms SET state = 'active', state_changed_at = ?, "
+                "feedback = MAX(feedback, ?), last_accessed_at = ? WHERE id = ?",
+                (now, cfg.feedback_useful, now, dup_id),
+            )
+            conn.execute(
+                "INSERT INTO journal(action, target_table, target_id, detail_json, created_at) "
+                "VALUES ('revive', 'atoms', ?, ?, ?)",
+                (dup_id, '{"via":"dedup_merge"}', now),
+            )
         return "merged", dup_id
 
     conflict_id, _conflict_sim = check_conflict(conn, content, fact_type, cfg)
