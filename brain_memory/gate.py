@@ -260,12 +260,50 @@ def _confidence(raw: float) -> float:
 # ---------------------------------------------------------------- LLM 门控
 
 
+def _parse_json_loose(text: str):
+    """从模型输出里抠 JSON。容忍 markdown 围栏、前后废话、多余空行。
+
+    为什么需要：实测 kimi 系列爱回
+        ```json
+        {"accept": true, ...}
+        ```
+    直接 json.loads 会失败，门控就白白熔断 60 秒。
+    """
+    if not text:
+        return None
+    t = text.strip()
+    # 剥 markdown 围栏
+    if t.startswith("```"):
+        nl = t.find("\n")
+        if nl > 0:
+            t = t[nl + 1:]
+        if t.endswith("```"):
+            t = t[:-3].strip()
+        elif "```" in t:
+            t = t[:t.rfind("```")].strip()
+    # 直接试
+    try:
+        return json.loads(t)
+    except Exception:
+        pass
+    # 抠第一个 {...}
+    start = t.find("{")
+    end = t.rfind("}")
+    if 0 <= start < end:
+        try:
+            return json.loads(t[start:end + 1])
+        except Exception:
+            return None
+    return None
+
+
 class _LlmClient:
     """极简 OpenAI 兼容客户端，只用 stdlib。失败一律返回 None。"""
 
     def __init__(self, cfg: MemoryConfig) -> None:
         self.cfg = cfg
         self._cooldown_until = 0.0
+        self._last_error = ""    # 最近一次失败原因，排查用
 
     # 2026-10-28 主从分离：优先用 extract_llm_*，没配就回落到主 llm_*。
     # 这样老配置不改也能跑，配了便宜模型就自动省额度。
@@ -300,7 +338,10 @@ class _LlmClient:
         body = {
             "model": self._model,
             "temperature": 0,
-            "max_tokens": 200,
+            # 2026-10-28：200 太小。deepseek-v4.1-flash 这类 reasoning 模型
+            # 思考链一下就把 200 吃光，content 返回空串 →
+            # 门控永远走规则回退（实测 last_error 是 "JSON: ''"）。
+            "max_tokens": 800,
             "messages": [
                 {
                     "role": "system",
@@ -330,9 +371,18 @@ class _LlmClient:
             with urllib.request.urlopen(
                     req, timeout=self.cfg.extract_llm_timeout_s) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-            content = payload["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
-        except Exception:
+            _msg = payload["choices"][0]["message"]
+            content = _msg.get("content") or ""
+            if not content.strip():
+                # 有的网关把结果放 reasoning_content 里
+                content = _msg.get("reasoning_content") or ""
+            parsed = _parse_json_loose(content)
+            if parsed is None:
+                raise ValueError("门控模型没给出可解析的 JSON: %r" % (content or "")[:80])
+        except Exception as exc:
+            # 2026-10-28：原来静默熔断，排查时完全看不出为什么走规则。
+            # 现在把真实原因打出来，只打前 100 字，不刷屏。
+            self._last_error = str(exc)[:100]
             self.tripped()
             return None
 
