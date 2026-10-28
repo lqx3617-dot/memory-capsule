@@ -85,6 +85,15 @@ class MemoryConfig:
     llm_timeout_s: float = 8.0
     llm_cooldown_s: float = 60.0
 
+    # ---- 抽取专用模型（2026-10-28 主从分离）----
+    # 门控判断这类「后台脏活」用便宜的快模型，主模型的额度全留给最终回复。
+    # 留空则回落到上面的 llm_*，老配置不改也能跑。
+    extract_llm_enabled: bool = True
+    extract_llm_endpoint: str | None = None
+    extract_llm_api_key: str | None = None
+    extract_llm_model: str | None = None
+    extract_llm_timeout_s: float = 6.0
+
     # ---- 晋升 ----
     enable_promote: bool = True
     promote_min_confidence: float = 0.55
@@ -224,6 +233,7 @@ class MemoryConfig:
         self._require(0.0 <= self.gate_threshold <= 1.0, "gate_threshold 需在 0..1")
         self._require(self.llm_timeout_s > 0, "llm_timeout_s 需大于 0")
         self._require(self.llm_cooldown_s >= 0, "llm_cooldown_s 不能为负")
+        self._require(self.extract_llm_timeout_s > 0, "extract_llm_timeout_s 需大于 0")
 
         self._require(0.0 <= self.promote_min_confidence <= 1.0,
                       "promote_min_confidence 需在 0..1")

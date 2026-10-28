@@ -267,12 +267,26 @@ class _LlmClient:
         self.cfg = cfg
         self._cooldown_until = 0.0
 
+    # 2026-10-28 主从分离：优先用 extract_llm_*，没配就回落到主 llm_*。
+    # 这样老配置不改也能跑，配了便宜模型就自动省额度。
+    @property
+    def _ep(self) -> str:
+        return (self.cfg.extract_llm_endpoint or self.cfg.llm_endpoint or "")
+
+    @property
+    def _key(self) -> str:
+        return (self.cfg.extract_llm_api_key or self.cfg.llm_api_key or "")
+
+    @property
+    def _model(self) -> str:
+        return (self.cfg.extract_llm_model or self.cfg.llm_model or "")
+
     @property
     def available(self) -> bool:
         return (
             self.cfg.enable_llm_gate
-            and bool(self.cfg.llm_endpoint)
-            and bool(self.cfg.llm_model)
+            and bool(self._ep)
+            and bool(self._model)
             and time.monotonic() >= self._cooldown_until
         )
 
@@ -282,9 +296,9 @@ class _LlmClient:
     def evaluate(self, text: str) -> GateResult | None:
         if not self.available:
             return None
-        url = self.cfg.llm_endpoint.rstrip("/") + "/chat/completions"
+        url = self._ep.rstrip("/") + "/chat/completions"
         body = {
-            "model": self.cfg.llm_model,
+            "model": self._model,
             "temperature": 0,
             "max_tokens": 200,
             "messages": [
@@ -308,12 +322,13 @@ class _LlmClient:
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": "Bearer " + (self.cfg.llm_api_key or ""),
+                "Authorization": "Bearer " + self._key,
             },
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.cfg.llm_timeout_s) as resp:
+            with urllib.request.urlopen(
+                    req, timeout=self.cfg.extract_llm_timeout_s) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
             content = payload["choices"][0]["message"]["content"]
             parsed = json.loads(content)
