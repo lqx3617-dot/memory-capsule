@@ -29,7 +29,7 @@
 | 哪些值得长期记 | 门控判断：偏好 / 决定 / 约束 / 踩坑 / 待办留下，寒暄和问句丢掉 |
 | 怎么找得到 | FTS5 关键词 + 向量语义，两路 RRF 融合，不靠单边 |
 | 旧信息会污染 | 质量随时间衰减（情节 7 天、语义 90 天、程序 365 天半衰期） |
-| 忘了怎么办 | 冲突只加边不删行，遗忘只改状态不物理删除 |
+| 忘了怎么办 | 冲突只加边不删行，遗忘默认只改状态；物理删除必须显式 hard + confirm |
 | 记忆能不能自己整理 | `dream()` 把高质量原子聚成实体页，写进 `DREAMS.md` |
 
 ---
@@ -256,7 +256,10 @@ quality = clamp01( feedback × decay × connectivity )
 | quality 低且曝光多 | `archive` | 不可检索，可恢复 |
 | 其他 | `keep` | 保留 |
 
-`forget()` 默认 `dry_run=True`，只报告不写库。**永远不物理删除**，`raw_events` 一行不动。
+`forget()` 默认 `dry_run=True`，只报告不写库。
+
+**物理删除是显式选项，不是默认行为**：只有 `hard=True` + `confirm=True`，且 `allow_hard_delete=True`（注意它默认就是 True），
+才会从 `atoms` 删行；`raw_events` 始终一行不动，溯源链不断。生产环境建议显式设 `allow_hard_delete=False`，把这条路彻底关掉。
 
 ### dream()：巩固
 
@@ -417,7 +420,7 @@ examples/          DSH 与 Operit 的接入配置示例
 1. `raw_events` 只增不改不删
 2. `atoms` 除 `state` / `quality` / `access_count` / `last_accessed_at` / `feedback` / `embedding` 外不可变
 3. 冲突只产生 `supersedes_id` 边，旧原子标 `superseded`，不删
-4. `forget` 默认 `dry_run=True`，永不物理删除
+4. `forget` 默认 `dry_run=True` 不写库；只有 `hard=True` + `confirm=True` 且 `allow_hard_delete=True` 才会删 `atoms` 行 —— `raw_events` 永远不动
 5. 降级不抛异常（只有 `require_wal` / `require_vector` 才抛）
 6. `atoms` / `atoms_fts` / 向量 同事务写入
 7. `journal` 只增不改不删
