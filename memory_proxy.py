@@ -99,7 +99,12 @@ class MemoryBridge:
         budget_tokens = max(1, int(self.budget_tokens))
         # 与 recall 的 chars_per_token 对齐：预算按 token 计，这里按字符近似
         limit_chars = max(1, int(budget_tokens * 1.7))
-        used = 0
+        # 固定提示语也占预算 —— 否则小预算下光提示语就把额度吃穿了
+        header_cost = len(_MEMORY_HEADER) + 2
+        if header_cost >= limit_chars:
+            _log("注入预算 %d token 连提示语都放不下，本轮不注入" % budget_tokens)
+            return ""
+        used = header_cost
 
         def take(text: str) -> bool:
             nonlocal used
@@ -115,9 +120,7 @@ class MemoryBridge:
         if query:
             try:
                 hits = self.db.recall(query, self.top_k, budget_tokens)
-                if hits:
-                    parts.append("【相关记忆】")
-                    used += len("【相关记忆】")
+                if hits and take("【相关记忆】"):
                     for m in hits:
                         if not take("- " + m.content):
                             break
@@ -128,9 +131,7 @@ class MemoryBridge:
             try:
                 rows = self.db.facts(
                     fact_types=["preference", "constraint"], limit=self.fact_limit)
-                if rows:
-                    parts.append("【长期偏好与约束】")
-                    used += len("【长期偏好与约束】")
+                if rows and take("【长期偏好与约束】"):
                     for m in rows:
                         # 偏好与记忆共用同一份预算，否则长偏好会把请求撑爆
                         if not take("- " + m.content):

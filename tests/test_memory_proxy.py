@@ -173,8 +173,10 @@ def main() -> int:
             system_text = "\n".join(
                 str(m.get("content")) for m in msgs if m.get("role") == "system"
             )
-            check(len(system_text) < 120,
-                  "小预算下注入被截断（%d 字符）" % len(system_text))
+            # 固定提示语本身就超过 5 token 的额度 -> 应当整体放弃注入，
+            # 而不是注入了提示语还声称「受预算约束」
+            check(len(system_text) < 20,
+                  "小预算下整体不注入（system 长度 %d）" % len(system_text))
         finally:
             proc3.terminate()
             try:
