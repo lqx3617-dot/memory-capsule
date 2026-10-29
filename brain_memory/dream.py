@@ -77,6 +77,10 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
             (limit,),
         ).fetchall()
 
+    # limit 默认 10 万：库再大也会被截断。截断时不能做孤儿清理 ——
+    # 本次没扫到的实体不代表它该消失。
+    truncated = len(rows) >= limit
+
     atoms: list[dict[str, Any]] = []
     for row in rows:
         quality = compute_quality(
@@ -156,7 +160,8 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
 
     if persist:
         # 只有全量扫描、且没被 dream_max_clusters 截断，才能断定「没出现在 pages 里的实体页该删」
-        prune = max_atoms is None and len(pages) < int(cfg.dream_max_clusters)
+        prune = (max_atoms is None and not truncated
+                 and len(pages) < int(cfg.dream_max_clusters))
         _persist(db, pages, text, len(atoms), cfg, prune=prune)
 
     return text
@@ -228,6 +233,12 @@ def _persist(
                 fh.write(text)
                 fh.flush()
                 os.fsync(fh.fileno())
+            try:
+                # os.replace 会让新文件继承 tmp 的权限（通常是 0644）。
+                # 原文件若是 0600，替换后就等于把权限放宽了 —— 先对齐。
+                os.chmod(tmp, os.stat(path).st_mode)
+            except OSError:
+                pass
             os.replace(tmp, path)
         except OSError:
             try:
