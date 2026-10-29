@@ -1,5 +1,44 @@
 # 更新记录
 
+## v1.3.2 —— 2026-10-29
+
+第六轮审计：**SQL 层的隐式契约** —— 索引是否覆盖实际的查询模式。
+
+### 补一个组合索引
+
+`forget.scan` 的查询是：
+
+```sql
+SELECT ... FROM atoms WHERE state IN ('active','silent','archived') ORDER BY id
+```
+
+已有的 `idx_atoms_state_quality(state, quality)` 能过滤 state，但给不出 `id` 顺序，
+所以要额外排一次序（temp b-tree）。新增 `idx_atoms_state_id(state, id)` 让两者都走索引。
+
+老库不需要 bump `user_version`：`_ensure_indexes()` 用 `CREATE INDEX IF NOT EXISTS` 幂等补齐。
+
+### 试过但放弃的：查询计划回归测试
+
+先用 `EXPLAIN QUERY PLAN` 写了个断言「关键查询走某条索引」的测试，跑了两轮 CI 后放弃：
+
+| 数据分布 | 优化器的选择 |
+|---|---|
+| 400 条全是 `active` | 全表扫（选择性 100%，扫全表本来就更快） |
+| 混合 state | 可能走索引，也可能不走 |
+
+**优化器的选择依赖数据分布，而真实库的分布千变万化** —— 这种断言只能产出噪音。
+改成 `tests/test_indexes.py`：只守「schema 声明的索引在库里都存在」，并给每个索引标注它服务哪条查询。
+走不走由优化器按数据决定，人不去替它拍板。
+
+### 发现但未动的：几个疑似死索引
+
+| 索引 | 情况 |
+|---|---|
+| `idx_atoms_entity` | `entity_id` 只在 SELECT 列里出现，没有 WHERE / GROUP BY 用它 |
+| `idx_atoms_last_access` | 同上（时间衰减在 Python 侧算） |
+| `idx_journal_action` / `idx_journal_created` | journal 是 append-only，每次写都要维护，但没有查询按这两列过滤 |
+
+删索引要迁移、而且可能影响未来运维查询，这轮只记录不动。等有真实数据量再决定。
 ## v1.3.1 —— 2026-10-29
 
 第五轮审计：查**代码之间的交叉一致性**（不是文档），在 L4 审计层挖到三个洞。

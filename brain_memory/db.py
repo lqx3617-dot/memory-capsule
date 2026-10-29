@@ -278,6 +278,7 @@ class MemoryDB:
             except sqlite3.Error as exc:
                 raise DatabaseError(f"建表失败: {exc}") from exc
             self._ensure_fts(self._writer)
+            self._ensure_indexes()
             with self._write_tx() as conn:
                 self._journal(
                     conn,
@@ -290,6 +291,23 @@ class MemoryDB:
             self._migrate(version)
         # 已是最新版本：仍要保证 FTS 表存在（幂等）
         self._ensure_fts(self._writer)
+        self._ensure_indexes()
+
+    def _ensure_indexes(self) -> None:
+        """幂等补索引 —— 老库也能升级，不用 bump user_version。
+
+        ⚠ 2026-10-29 交叉核对查询计划时发现：`forget.scan` 是
+        `WHERE state IN (...) ORDER BY id`，而 idx_atoms_state_quality(state, quality)
+        给不出 id 序，会多一次 temp b-tree 排序。补一个 (state, id) 组合索引。
+        """
+        assert self._writer is not None
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS idx_atoms_state_id ON atoms(state, id)",
+        ):
+            try:
+                self._writer.execute(stmt)
+            except sqlite3.Error as exc:
+                logger.warning("记忆胶囊: 建索引失败: %s (%s)", stmt, exc)
 
     def _migrate(self, from_version: int) -> None:
         """逐版本升级。当前只处理 v1 -> v2（atoms 增加 embedding）。"""
