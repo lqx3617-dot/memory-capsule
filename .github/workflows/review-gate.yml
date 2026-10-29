@@ -40,7 +40,7 @@ jobs:
               '          isResolved',
               '          isOutdated',
               '          comments(first: 1) {',
-              '            nodes { author { login } path line body }',
+              '            nodes { author { login __typename } path line body }',
               '          }',
               '        }',
               '      }',
@@ -56,7 +56,10 @@ jobs:
               if (t.isResolved) return false;
               const first = (t.comments.nodes || [])[0];
               if (!first || !first.author) return false;
-              return first.author.login.endsWith('[bot]');
+              // GraphQL 里 bot 的 login 是 chatgpt-codex-connector（不带 [bot]），
+              // 只看 login 后缀会永远判 false，闸门变假绿。必须认 __typename。
+              const a = first.author;
+              return a.__typename === 'Bot' || (a.login || '').endsWith('[bot]');
             });
 
             if (!pending.length) {

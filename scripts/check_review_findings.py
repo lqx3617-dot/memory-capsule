@@ -48,7 +48,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           isResolved
           comments(first: 1) {
-            nodes { author { login } path line body }
+            nodes { author { login __typename } path line body }
           }
         }
       }
@@ -75,8 +75,11 @@ def pending_threads(number: int, token: str) -> tuple[str, list[dict]]:
         if not first:
             continue
         comment = first[0]
-        login = ((comment.get("author") or {}).get("login") or "")
-        if not login.endswith("[bot]"):
+        author = comment.get("author") or {}
+        login = author.get("login") or ""
+        # GraphQL 里 bot 的 login 不带 [bot] 后缀（REST 才带），
+        # 只判后缀会让脚本永远报「已处理」。认 __typename。
+        if author.get("__typename") != "Bot" and not login.endswith("[bot]"):
             continue
         out.append(comment)
     return pr.get("title") or "", out
