@@ -31,6 +31,8 @@ _STOP_ENTITY = {
 # 实体名里出现这些字，基本可以断定是把半句话当名词了
 _BAD_ENTITY_CHARS = set("的了是在和与或把被让给从对为要用能不要把没很更最都也就还才你我他它这那")
 _MIN_ATOM_CHARS = 2
+# 数字替换后至少这么长才拿来比较，避免 "#点" 这种短骨架误判
+_MIN_STEM_CHARS = 4
 
 
 
@@ -201,11 +203,16 @@ def check_conflict(
         other = str(row[1])
         other_nums = _numbers(other)
         if polarity(other) == mine:
-            # 极性相同、句干相似、数字完全不相交 -> 是被改写过的旧事实（原实现的漏杀侧）
+            # 极性相同、数字不相交 -> 可能是被改写过的旧事实（「十点下班」改成「九点下班」）。
+            #
+            # ⚠ 2026-10-29 实测修正：原来判据是「去掉数字后相似度 >= 0.6」，结果两条随机内容
+            # （a1b2c3d4-alpha / e5f6a7b8-beta）去掉数字后都退化成 #a#b#c#d 这种同形骨架，
+            # 相似度轻易过 0.6 —— 40 条正常记忆里有 32 条被误判成冲突、被标 superseded 下线。
+            # 收紧成：**去掉数字后完全相同**才算改写。真正的改写只差数字。
             if mine_nums and other_nums and not (mine_nums & other_nums):
-                stem = similarity(_NUM_RE.sub("#", content), _NUM_RE.sub("#", other))
-                if stem >= 0.6:
-                    return int(row[0]), stem
+                stem = _NUM_RE.sub("#", content)
+                if stem == _NUM_RE.sub("#", other) and len(stem) >= _MIN_STEM_CHARS:
+                    return int(row[0]), 1.0
             continue
         sim = similarity(content, other)
         if sim >= 0.55 and sim > best_sim:

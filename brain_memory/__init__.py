@@ -22,7 +22,7 @@ from .errors import (
 )
 from .types import ForgetDecision, Memory, Stats, utc_now
 
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 __display_name__ = "记忆胶囊"
 
 # ---- 兼容别名：同一对象引用，零包装零转发开销 ----
