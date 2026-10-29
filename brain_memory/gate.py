@@ -489,7 +489,10 @@ class RuleGate:
             if llm is not None:
                 return llm
             method = "rule"
-            if db is not None and self.cfg.llm_endpoint:
+            # 只有「启用了门控却又拿不到结果」才算降级。
+            # 光配了 endpoint 但 enable_llm_gate=False 时，LLM 根本没被调用，
+            # 那不是降级，不该写进审计。
+            if db is not None and self.cfg.enable_llm_gate and self.cfg.llm_endpoint:
                 try:
                     db.mark_llm_degraded("gate llm 调用失败，回退规则")
                 except Exception:

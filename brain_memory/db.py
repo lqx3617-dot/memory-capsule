@@ -419,17 +419,18 @@ class MemoryDB:
 
     def mark_llm_degraded(self, reason: str = "") -> None:
         """T4 门控在 LLM 调用失败后调用；不抛异常。"""
-        was = self._llm_mode
+        if self._llm_mode != "on":
+            # "off"：根本没启用 LLM 门控，不存在降级；
+            # "degraded"：已经在降级态，再标一次只会重复刷日志。
+            return
         self._llm_mode = "degraded"
         logger.warning("记忆胶囊: LLM 降级为规则门控（%s）", reason or "unknown")
-        # 只在「从正常掉到降级」的那一次留痕，否则熔断期内每条消息都写一条 journal
-        if was != "degraded":
-            try:
-                with self._write_tx() as conn:
-                    self._journal(conn, "gate_llm_fallback",
-                                  detail={"reason": reason or "unknown"})
-            except Exception:
-                pass
+        try:
+            with self._write_tx() as conn:
+                self._journal(conn, "gate_llm_fallback",
+                              detail={"reason": reason or "unknown"})
+        except Exception:
+            pass
 
     def mark_llm_ok(self) -> None:
         if self._llm_mode == "degraded" and self._cfg.enable_llm_gate:
