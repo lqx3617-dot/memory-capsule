@@ -206,6 +206,10 @@ mem.facts(*, session_id: str | None = None,
 ### 4.1 `stats() -> Stats`
 只读、不加写锁；返回 §1 的 `Stats`。缺表（未初始化完成）时对应计数为 0。
 
+> ⚠ `avg_quality` 统计的是 `atoms.quality` **存储快照**的平均值，不是现算值。
+> 这与 recall / facts / forget / dream 的「现场重算」口径不同 —— 快照不随时间衰减，
+> 所以库长时间没跑过 `forget --apply` 时，这个数会偏高。要现算质量请看 `recall()` 返回的 `quality` 字段。
+
 ### 4.2 `maintenance(level: str = "normal") -> dict`
 `level` ∈ `"light"`（`PRAGMA optimize`）/`"normal"`（+ `wal_checkpoint(TRUNCATE)`）/`"full"`（+ `VACUUM`）。
 返回 `{"journal_mode", "checkpointed_pages", "optimized", "vacuumed", "duration_ms"}`。

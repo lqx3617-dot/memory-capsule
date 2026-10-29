@@ -38,6 +38,16 @@ def main() -> int:
             return 1
         print("[OK]   反馈回升后重新可召回: %r" % loud[0].content)
 
+        print("4. LIKE 兜底（FTS 零命中）同样走现算")
+        db.remember("s", "爸爸喜欢喝乌龙茶", fact_type="preference", confidence=0.55)
+        # 2 字查询在 trigram 下不可用，会走 LIKE 兜底。
+        # 存储 quality=0.55 < 0.8，但现算 ≈1.0 —— 旧实现会把它过滤掉。
+        hits = db.recall("乌龙", min_quality=0.8)
+        if not hits:
+            print("[FAIL] LIKE 兜底仍按存储快照过滤（存储 0.55 < 0.8，现算约 1.0）")
+            return 1
+        print("[OK]   LIKE 兜底用现算质量，没被快照挡住")
+
         if not db.facts(min_quality=0.3):
             print("[FAIL] facts(min_quality=0.3) 应返回该原子")
             return 1

@@ -270,6 +270,8 @@ quality = clamp01( feedback × decay × connectivity )
 这一点很重要：写入时它等于 confidence，之后不会自己衰减；如果拿它做过滤，
 半年前该忘的记忆照样会被返回。`recall` / `facts` / `forget` / `dream` 现在用同一个函数。
 
+唯一例外是 `stats().avg_quality` —— 它统计的是**快照平均值**，不是现算值。
+
 ### 判定
 
 | 条件 | 动作 | 说明 |
