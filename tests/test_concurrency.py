@@ -64,9 +64,9 @@ def main() -> int:
         "db = bm.MemoryDB(%r)" % db_path,
         "for i in range(20):",
         "    db.remember('p', os.urandom(8).hex() + '-' + sys.argv[1])",
-        "before = db.stats().counts['l2_active']",
+        "before = db.stats().counts",
         "db.close()",
-        "print(sys.argv[1], before)",
+        "print(sys.argv[1], dict(before))",
     ])
     procs = []
     for tag in ("alpha", "beta"):
@@ -87,9 +87,7 @@ def main() -> int:
     db = bm.MemoryDB(db_path)
     try:
         st = db.stats()
-        print("    [INFO] 合并后 atoms=%d candidates=%d raw=%d" % (
-            st.counts['l2_active'], st.counts['l1_promoted'] + st.counts['l1_pending'],
-            st.counts['l0_events']))
+        print("    [INFO] 合并后 counts: " + str(dict(st.counts)))
         check(st.counts["l2_active"] >= 40,
               "两条进程各写 20 条（内容随机不重复），合并后 >= 40（实际 %d）" % st.counts["l2_active"])
     finally:
