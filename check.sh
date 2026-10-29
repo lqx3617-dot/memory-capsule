@@ -74,7 +74,7 @@ if [ "$FULL" -eq 1 ]; then
   step "4/4 全量测试"
   for script in tests/test_smoke.py tests/test_t4.py tests/test_phase2.py tests/test_escalation.py examples/embed_demo.py \
     tests/test_gate_assertive.py tests/test_revive.py tests/test_connectivity.py tests/test_vec_window.py \
-    tests/test_quality_live.py tests/test_call_name.py tests/test_vec_metric.py tests/test_mcp_server.py tests/test_memory_proxy.py tests/test_version.py tests/test_reindex.py tests/test_journal.py tests/test_indexes.py tests/test_concurrency.py tests/test_conflict.py tests/test_migration.py; do
+    tests/test_quality_live.py tests/test_call_name.py tests/test_vec_metric.py tests/test_mcp_server.py tests/test_memory_proxy.py tests/test_version.py tests/test_reindex.py tests/test_journal.py tests/test_indexes.py tests/test_concurrency.py tests/test_conflict.py tests/test_migration.py tests/test_dream.py; do
     if [ ! -f "$ROOT/$script" ]; then
       warn "$script 不存在，跳过"
       continue
