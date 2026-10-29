@@ -116,7 +116,7 @@ mem.recall(query: str, top_k: int = 5, budget_tokens: int = 2000, *,
 | 抛异常 | `ValueError`、`ClosedError`、`LockTimeoutError`、`DatabaseError` |
 | 降级 | vec 不可用 → 纯 FTS5，结果照常返回；FTS 表空 → 返回 `[]` |
 | 性能 | < 100ms（atoms < 10k） |
-| escalation | `max(score) < escalate_threshold(0.35)` 或 L2 空时，若 `enable_escalation=True` 则向下探 L1 → L0（L0 只看最近 `escalate_l0_limit` 条，绝不全表扫）；L0/L1 命中不计访问计数 |
+| escalation | **只在 `enable_escalation=True` 且 L2 结果条数 < `top_k` 时才会下探**；此时若 L2 为空或 `max(score) < escalate_threshold(0.35)`，向下补 L1 → L0（L0 只看最近 `escalate_l0_limit` 条，绝不全表扫）。**L2 已填满 `top_k` 时不下探，哪怕分数全都低于阈值。** L0/L1 命中不计访问计数 |
 
 ### 3.3 `forget`
 
