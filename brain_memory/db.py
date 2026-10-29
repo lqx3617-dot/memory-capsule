@@ -131,6 +131,16 @@ class MemoryDB:
             self._resolve_journal_mode()
             self._build_sync()          # 必须早于 _ensure_schema：后者要用 _write_tx
             self._ensure_schema()
+            if self._degraded_wal:
+                # WAL 降级发生在建表之前，那时还没有 journal 表；建完补记一笔。
+                try:
+                    with self._write_tx() as conn:
+                        self._journal(conn, "degrade_wal", detail={
+                            "requested": self._cfg.journal_mode_target,
+                            "actual": self._journal_mode,
+                        })
+                except Exception:
+                    pass
             self._probe_vector()
             self._probe_llm()
 
@@ -409,8 +419,18 @@ class MemoryDB:
 
     def mark_llm_degraded(self, reason: str = "") -> None:
         """T4 门控在 LLM 调用失败后调用；不抛异常。"""
+        if self._llm_mode != "on":
+            # "off"：根本没启用 LLM 门控，不存在降级；
+            # "degraded"：已经在降级态，再标一次只会重复刷日志。
+            return
         self._llm_mode = "degraded"
         logger.warning("记忆胶囊: LLM 降级为规则门控（%s）", reason or "unknown")
+        try:
+            with self._write_tx() as conn:
+                self._journal(conn, "gate_llm_fallback",
+                              detail={"reason": reason or "unknown"})
+        except Exception:
+            pass
 
     def mark_llm_ok(self) -> None:
         if self._llm_mode == "degraded" and self._cfg.enable_llm_gate:

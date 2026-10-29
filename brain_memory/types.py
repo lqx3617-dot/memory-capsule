@@ -27,7 +27,7 @@ JOURNAL_ACTIONS = (
     "promote",
     "merge",
     "conflict",
-    "silence",
+    "silent",          # 与 ATOM_STATES / FORGET_ACTIONS 对齐；原来写成 silence，从未产生
     "archive",
     "revive",
     "unlink",

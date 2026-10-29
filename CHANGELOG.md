@@ -1,5 +1,31 @@
 # 更新记录
 
+## v1.3.1 —— 2026-10-29
+
+第五轮审计：查**代码之间的交叉一致性**（不是文档），在 L4 审计层挖到三个洞。
+
+### `JOURNAL_ACTIONS` 里的 `silence` 是从未产生的值
+
+`forget.apply` 写 journal 时用的是 `d.action`，取值来自 `FORGET_ACTIONS = ("silent", "archive", "unlink")`。
+而 `JOURNAL_ACTIONS` 里写的是 `"silence"` —— 声明了一个永远不会出现的动作，真实产生的 `"silent"` 反而没声明。
+
+### 冲突不留痕
+
+`promote` 检测到冲突时只把旧原子标 `superseded`，**不写 journal**。
+`conflict` 这个动作在 `JOURNAL_ACTIONS` 里声明了，但代码里从未产生 —— L4 声称「记录所有状态变更」，实际漏了最该留痕的一类。
+
+### LLM 降级与 WAL 降级也不留痕
+
+- `mark_llm_degraded` 只改内存状态与日志，`gate_llm_fallback` 声明了没用
+- WAL 降级发生在建表之前（那时还没有 journal 表），日志里有一行 warning，库里没有记录
+
+现在：LLM 降级只在「从正常掉到降级」的那一次写 journal（避免熔断期内每条消息都写）；WAL 降级在建表完成后补记一笔。
+
+### 新增 `tests/test_journal.py`
+
+跑完整流程（ingest / 门控拒收 / 未知 role / remember / 冲突 / 遗忘 / 巩固 / 维护），
+然后**反过来检查 journal 表里出现的每个 action 是否都在 `JOURNAL_ACTIONS` 里**。
+这类「运行时反查声明」的测试，比静态扫描更能抓住漂移。
 ## v1.3.0 —— 2026-10-29
 
 第四轮审计：查 `docs/EMBEDDING.md` 与 `docs/PLAN.md` 时查出三处真问题。
