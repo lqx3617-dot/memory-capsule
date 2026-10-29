@@ -40,11 +40,12 @@ def _call(path: str, token: str, payload: dict | None = None) -> dict:
 
 
 QUERY = """
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       title
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           isResolved
           comments(first: 1) {
@@ -60,29 +61,39 @@ query($owner: String!, $repo: String!, $number: Int!) {
 
 def pending_threads(number: int, token: str) -> tuple[str, list[dict]]:
     owner, repo = REPO.split("/", 1)
-    data = _call("/graphql", token, {
-        "query": QUERY,
-        "variables": {"owner": owner, "repo": repo, "number": number},
-    })
-    if "errors" in data:
-        raise RuntimeError(str(data["errors"])[:300])
-    pr = data["data"]["repository"]["pullRequest"]
     out: list[dict] = []
-    for thread in pr["reviewThreads"]["nodes"]:
-        if thread.get("isResolved"):
-            continue
-        first = (thread.get("comments") or {}).get("nodes") or []
-        if not first:
-            continue
-        comment = first[0]
-        author = comment.get("author") or {}
-        login = author.get("login") or ""
-        # GraphQL 里 bot 的 login 不带 [bot] 后缀（REST 才带），
-        # 只判后缀会让脚本永远报「已处理」。认 __typename。
-        if author.get("__typename") != "Bot" and not login.endswith("[bot]"):
-            continue
-        out.append(comment)
-    return pr.get("title") or "", out
+    title = ""
+    cursor = None
+    for _page in range(20):          # 分页：超过 100 条 thread 时不能只看第一页
+        data = _call("/graphql", token, {
+            "query": QUERY,
+            "variables": {"owner": owner, "repo": repo, "number": number, "cursor": cursor},
+        })
+        if "errors" in data:
+            raise RuntimeError(str(data["errors"])[:300])
+        pr = data["data"]["repository"]["pullRequest"]
+        title = pr.get("title") or ""
+        block = pr["reviewThreads"]
+        for thread in block["nodes"]:
+            if thread.get("isResolved"):
+                continue
+            first = (thread.get("comments") or {}).get("nodes") or []
+            if not first:
+                continue
+            comment = first[0]
+            author = comment.get("author") or {}
+            login = author.get("login") or ""
+            # GraphQL 里 bot 的 login 不带 [bot] 后缀（REST 才带），
+            # 只判后缀会让脚本永远报「已处理」。认 __typename。
+            if author.get("__typename") != "Bot" and not login.endswith("[bot]"):
+                continue
+            out.append(comment)
+        page = block.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            break
+        cursor = page.get("endCursor")
+    return title, out
+
 
 
 def main(argv: list[str]) -> int:
