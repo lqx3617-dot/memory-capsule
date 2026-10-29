@@ -167,8 +167,16 @@ def check_duplicate(
     best_sim = 0.0
     _cname = _call_name(content)
     _cnums = _numbers(content)
+    _mine_polarity = polarity(content)
     for row in rows:
         _other = str(row[1])
+        # 规则零：极性相反的一律不做「重复」处理 —— 那多半是一次更正
+        # （「统一用 SQLite」→「不用 SQLite」），应该走冲突检测把旧的下线，
+        # 而不是合并进旧原子把用户的新说法丢掉。
+        # ⚠ 2026-10-29 实测：这两句相似度 0.96，原来直接判重复合并，
+        # 用户改主意后库里还是旧内容，等于听不见。
+        if polarity(_other) != _mine_polarity:
+            continue
         # 规则一：称呼同一个人 → 直接视为重复（不管字符串像不像）
         _oname = _call_name(_other)
         if _cname and _oname and _cname == _oname and len(_cname) >= _CALL_MIN:
