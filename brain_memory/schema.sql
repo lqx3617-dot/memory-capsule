@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS atoms (
     embedding           BLOB
 );
 CREATE INDEX IF NOT EXISTS idx_atoms_state_quality ON atoms(state, quality);
+-- forget.scan 的 WHERE state IN (...) + ORDER BY id 需要这个组合索引，
+-- 否则 state 过滤走索引后还要再排一次序（temp b-tree）。
+CREATE INDEX IF NOT EXISTS idx_atoms_state_id ON atoms(state, id);
 CREATE INDEX IF NOT EXISTS idx_atoms_entity ON atoms(entity_id);
 CREATE INDEX IF NOT EXISTS idx_atoms_fact_type ON atoms(fact_type);
 CREATE INDEX IF NOT EXISTS idx_atoms_supersedes ON atoms(supersedes_id);
