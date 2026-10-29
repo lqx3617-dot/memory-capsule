@@ -1,6 +1,9 @@
 """记忆胶囊（brain_memory）—— 可嵌入的长期记忆库。
 
-Phase 1 完成：errors / config / types / locks / db / schema / gate / promote / recall / forget / dream(桩)。
+纯 stdlib + sqlite3，零外部依赖。L0-L4 五层记忆、混合检索（FTS5 + 向量 RRF）、
+三态遗忘、真实巩固（L3 实体页 + DREAMS.md）。
+
+宿主接入有两种方式：mcp_server.py（工具调用）与 memory_proxy.py（全自动注入）。
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ from .errors import (
 )
 from .types import ForgetDecision, Memory, Stats, utc_now
 
-__version__ = "0.1.0"
+__version__ = "1.3.0"
 __display_name__ = "记忆胶囊"
 
 # ---- 兼容别名：同一对象引用，零包装零转发开销 ----
