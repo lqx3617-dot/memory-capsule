@@ -504,6 +504,7 @@ PRoot 下按 1.5–3 倍 I/O 放大估算，仍远低于 ingest < 50ms / recall 
 
 | 文件 | 内容 |
 |---|---|
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | **运维手册**：出问题时按症状查——什么现象、哪一层、怎么修 |
 | [`docs/MCP.md`](docs/MCP.md) | 接成 MCP 插件：DSH / Operit AI / Claude Desktop，含全自动代理模式与保活 |
 | [`docs/PUBLIC_API.md`](docs/PUBLIC_API.md) | API 契约、异常、降级总表、不变量 |
 | [`docs/PLAN.md`](docs/PLAN.md) | 实施计划、schema、并发模型、验收映射 |

@@ -123,4 +123,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # ⚠ 2026-10-29：在 py3.12 的 CI 上出现过「测试自己打印全部通过、check.sh 却判失败」——
+    # 也就是退出码非 0 但 FAILS 为空。解释器关闭阶段还有 flusher 线程与子进程的清理，
+    # 那里出的问题不该算到这个测试头上。这里显式 flush 后用 os._exit 交确定的退出码，
+    # 把「测试结果」和「解释器清理」两件事分开。
+    _code = main()
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(_code)

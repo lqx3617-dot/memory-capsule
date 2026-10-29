@@ -79,10 +79,14 @@ if [ "$FULL" -eq 1 ]; then
       warn "$script 不存在，跳过"
       continue
     fi
-    if ( cd "$ROOT" && "$PY" "$script" >/dev/null 2>&1 ); then
+    # 单独取退出码：有些失败是「测试自己说全部通过、退出码却非 0」，
+    # 不打出来分不清是断言失败还是解释器/信号问题。
+    ( cd "$ROOT" && "$PY" "$script" >/dev/null 2>&1 )
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
       ok "$script"
     else
-      bad "$script"
+      bad "$script (exit=$rc)"
       ( cd "$ROOT" && "$PY" "$script" 2>&1 | tail -20 )
     fi
   done
