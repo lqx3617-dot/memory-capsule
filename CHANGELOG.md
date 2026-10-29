@@ -1,5 +1,33 @@
 # 更新记录
 
+## v1.2.0 —— 2026-10-29
+
+两种接入宿主的方式，任选或并用。
+
+### 新增 `mcp_server.py`
+
+把记忆胶囊包成 MCP 服务器：纯 stdlib 实现 JSON-RPC 2.0 over stdio，另带 `--http` 模式。
+7 个工具：`memory_ingest` / `memory_remember` / `memory_recall` / `memory_context` /
+`memory_forget` / `memory_dream` / `memory_stats`。
+DSH、Operit AI、Claude Desktop、Cline 用同一份实现。
+
+### 新增 `memory_proxy.py`
+
+OpenAI 兼容记忆代理：把宿主 baseURL 指过来即可全自动 ——
+请求前注入相关记忆与长期偏好，响应后把这一轮写回 L0。
+解决了「MCP 工具调不调由模型决定」的短板，宿主不需要支持 MCP。
+
+### 新增脚本与文档
+
+- `scripts/run-memory-mcp.sh` / `scripts/run-memory-proxy.sh`：Termux 保活启动（自带 wake-lock）
+- `docs/MCP.md`：两端接入、全自动模式、保活、验证步骤
+- `examples/dsh-memory-mcp.cordis.yml` / `examples/operit-memory-mcp.json`
+
+### 测试
+
+- `tests/test_mcp_server.py`：子进程握手、7 个工具、错误路径（-32601 / -32700 / 未知工具 / 空参数）、退出码
+- `tests/test_memory_proxy.py`：假上游 + 真代理 + 真 SQLite，覆盖注入 / 回写 / `X-Memory: off` / 上游 502
+- `check.sh --full` 现在覆盖 14 个脚本
 ## v1.1.0 —— 2026-10-27
 
 质量与判据修复，含 3 处 config 项移除（**breaking**：删掉的键会以 ConfigError 明确报错，不再静默无效）。
