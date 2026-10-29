@@ -81,6 +81,50 @@ Operit 的 MCP 配置是 (name, endpoint, description, capabilities, extraData) 
 2. 新开会话 B（不用重启宿主）：我的验证饮料是什么？查一下记忆 → 应调 memory_recall 并答出
 3. 继续：用这个偏好给会议推荐一款茶 → 回答应引用召回值
 
+## 全自动模式：不用等模型自觉
+
+MCP 有个绕不开的短板：**要不要调工具，由模型自己决定**。模型这一轮偷懒，这次对话就没被记住。
+
+解决办法不是逼模型，是把决定权从它手里拿走 —— 起一个 **OpenAI 兼容代理**，把宿主的 baseURL 指过去：
+
+    python3 memory_proxy.py --db ~/.brain-memory/memory.db \
+        --upstream https://api.deepseek.com/v1 --port 8790
+
+    宿主 baseURL 填 http://127.0.0.1:8790/v1
+
+它做两件事，都在转发前后顺手完成：
+
+| 时机 | 动作 |
+|---|---|
+| 请求前 | 拿最后一条 user 消息去 recall，把【相关记忆】+【长期偏好与约束】拼进 system |
+| 响应后 | 把这一轮的 user / assistant 原文写回 L0（assistant 会被门控拒收，只记用户说的） |
+
+好处是**宿主完全不用支持 MCP**，任何 OpenAI 兼容客户端都能用；代价是每轮多一次本地 SQLite 查询（毫秒级）。
+
+三种模式怎么选：
+
+| 场景 | 用哪个 |
+|---|---|
+| 宿主支持 MCP、模型听话 | mcp_server.py（工具调用，最灵活） |
+| 宿主只认 baseURL / 模型懒得调工具 | memory_proxy.py（全自动，最稳） |
+| 两个都要 | 同时开，共用同一个 db 文件（SQLite WAL 支持多进程读写） |
+
+代理的开关：
+
+    --top-k 5            每轮注入几条记忆
+    --budget-tokens 800  注入预算
+    --no-facts           不注入长期偏好（省 token）
+    --no-write-back      只注入，不记录对话（隐私模式）
+    X-Memory: off        单个请求跳过（请求头）
+
+## Termux 保活
+
+    sh scripts/run-memory-mcp.sh                          # MCP HTTP :8788
+    sh scripts/run-memory-proxy.sh https://api.deepseek.com/v1   # 代理 :8790
+
+脚本会自动 `termux-wake-lock`。但**还要手动关掉电池优化**（电池 → 应用启动管理 → Termux → 允许后台），
+否则息屏几分钟照样被杀。国产 ROM（MIUI / ColorOS / OriginOS）这一步尤其必须做。
+
 ## 已知边界
 
 - **进程寿命**：Android 会杀后台进程。Termux 要 termux-wake-lock；Operit 若走 HTTP 传输，
@@ -89,3 +133,4 @@ Operit 的 MCP 配置是 (name, endpoint, description, capabilities, extraData) 
   （DSH 有插件钩子，那是另一条路）。
 - **纯 Python 向量是 O(n)**：超过万条建议 pip install -e ".[numpy]" 或 ".[vec]"。
 - **stdio 与 HTTP 二选一**：stdio 更简单（宿主管生命周期），HTTP 更适合多客户端共存。
+- **代理在请求路径上，会看到明文对话**：不想记录就加 `--no-write-back`，或单个请求带 `X-Memory: off`。
