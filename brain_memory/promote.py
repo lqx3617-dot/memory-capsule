@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import json
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
@@ -286,6 +287,16 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
         conn.execute(
             "UPDATE atoms SET state = 'superseded', state_changed_at = ? WHERE id = ?",
             (utc_now(), conflict_id),
+        )
+        # ⚠ 2026-10-29 交叉核对发现：这里原来只改 state 不写 journal ——
+        # L4 声称记录所有状态变更，实际 conflict 这个动作声明了却从未产生。
+        conn.execute(
+            "INSERT INTO journal(action, target_table, target_id, detail_json, created_at) "
+            "VALUES ('conflict', 'atoms', ?, ?, ?)",
+            (conflict_id,
+             json.dumps({"superseded_by": atom_id, "fact_type": fact_type},
+                        ensure_ascii=False),
+             utc_now()),
         )
 
     return "promoted", atom_id
