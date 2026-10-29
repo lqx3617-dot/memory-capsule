@@ -9,7 +9,8 @@
 
 给 AI 一套**会遗忘、会巩固、会做梦**的长期记忆。
 
-纯 stdlib + sqlite3，没有 HTTP 服务、没有 Redis、没有模型权重、不需要 root。
+纯 stdlib + sqlite3，没有 Redis、没有模型权重、不需要 root。
+**库本身不开端口、不主动联网** —— `import brain_memory` 不会监听任何端口。
 专为 Android PRoot（Termux / proot-distro，aarch64 用户态）设计：所有降级路径自动兜底，
 没有 numpy 也能跑，没有 sqlite-vec 也能跑，LLM 挂了照样跑。
 
@@ -44,6 +45,18 @@
 | Android 常驻 | `scripts/*.sh` | wake-lock + 后台启动 |
 
 前三种可以并用，共用一个 `memory.db`（SQLite WAL 支持多进程读写）。
+
+**谁开端口、谁联网：**
+
+| 用法 | 监听端口 | 出站网络 |
+|---|---|---|
+| `import brain_memory`（库） | 不开 | 不开（除非你配了 `enable_llm_gate` 或 `embedding_backend=http`） |
+| `mcp_server.py`（stdio，默认） | 不开 | 不开 |
+| `mcp_server.py --http 8788` | 开 `127.0.0.1:8788` | 不开 |
+| `memory_proxy.py` | 开 `127.0.0.1:8790` | **会**（要转发到上游 LLM） |
+
+想要绝对零端口：只用库，或者 MCP 走 stdio 模式（宿主拉子进程，不走网络）。
+两个脚本的监听地址默认都是 `127.0.0.1`，不对外；`--host` 可以改，但别改成 `0.0.0.0`。
 
 ### 用法一：当库用
 
