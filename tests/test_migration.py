@@ -88,11 +88,18 @@ def main() -> int:
         fts = conn.execute("SELECT name FROM sqlite_master WHERE name='atoms_fts'").fetchone()
         check(fts is not None, "atoms_fts 建好了")
 
-        print("4. 旧数据还在，而且能被检索到")
+        print("4. 旧数据还在，而且 FTS 索引真的重建了")
         st = db.stats()
         check(st.counts["l2_active"] >= 1, "旧原子还在（l2_active=%d）" % st.counts["l2_active"])
+        # 不能只靠 recall：默认 enable_like_fallback=True，FTS 空着也能用 LIKE 兜回来，
+        # 还有向量路 —— 那样「迁移时 rebuild 失败」这个回归根本测不出来。
+        # 直接查 FTS5 MATCH，绕过两条兜底。
+        rows = db.conn.execute(
+            "SELECT rowid FROM atoms_fts WHERE atoms_fts MATCH ?", ('"WAL"',)
+        ).fetchall()
+        check(bool(rows), "atoms_fts 里能 MATCH 到旧原子（%d 行）" % len(rows))
         hits = db.recall("数据库统一用 WAL", top_k=3)
-        check(bool(hits), "旧的 v1 原子能被 recall 到（%d 条）" % len(hits))
+        check(bool(hits), "recall 也能拿到（%d 条）" % len(hits))
 
         print("5. 迁移后还能正常写入新数据")
         db.remember("s", "迁移之后新写入的一条记忆", fact_type="fact")
