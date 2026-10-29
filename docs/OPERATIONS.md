@@ -93,10 +93,10 @@ SELECT id, action FROM journal WHERE action IN ('silent','archive') ORDER BY id 
 | `active` | 查得到 | 是打分或预算问题：调 `min_quality` / `top_k` / `budget_tokens` |
 | `active` | **查不到** | **FTS 与 atoms 不同步**，需要重建索引 |
 
-重建：
+重建（用公开方法，别直接碰 `db.conn` —— 那绕过写锁与事务，和反面清单里的红线是同一条）：
 
 ```python
-db.conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')")
+db.rebuild_fts()
 ```
 
 ### 2.3 「记着旧版本，不认新说法」
@@ -246,12 +246,15 @@ db = bm.MemoryDB(path)   # 打开时自动 ALTER TABLE / 补索引 / rebuild FTS
 
 **回滚不安全**：升级后 `user_version=2`，旧版代码会抛 `SchemaVersionError`（有意如此，不瞎改）。要回滚先备份。
 
-备份（WAL 模式）：
+备份（WAL 模式）按这个顺序：
+
+1. **先停掉所有打开这个库的进程** —— `mcp_server.py`、`memory_proxy.py`、你的 App。
+   WAL 允许多个写者，只要还有一个客户端在跑，拷出来的就不是一致快照。
+2. 在最后一个客户端里 `db.close()`（它会 checkpoint 并合并 WAL）。
+3. 再拷文件：`cp memory.db memory.db.bak`（同目录若还有 `-wal` / `-shm`，一并删掉或拷走）。
 
 ```bash
-# 只拷 .db 会丢 WAL 里的内容
-# 正确做法：先 close()（它会 checkpoint），再拷
-cp memory.db memory.db.bak
+# 反例：App 还开着就直接 cp —— 只拷到主文件，WAL 里没合并的写入全丢
 ```
 
 ---

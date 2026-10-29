@@ -992,6 +992,19 @@ class MemoryDB:
             forget_apply(self, decisions)
         return [d.as_dict() for d in decisions]
 
+    def rebuild_fts(self) -> None:
+        """重建 FTS 索引 —— 怀疑 atoms_fts 与 atoms 不同步时用。
+
+        别自己去 db.conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')")：
+        那绕过写锁与事务，和「别用 db.conn 直接执行 SQL」是同一条红线。
+        """
+        self._ensure_open()
+        with self._write_tx() as conn:
+            try:
+                conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')")
+            except sqlite3.Error as exc:
+                raise DatabaseError(f"FTS 重建失败: {exc}") from exc
+
     def reindex_vectors(self, limit: int | None = None) -> int:
         """按当前 embedder 重算活跃原子的向量，返回成功条数。
 
