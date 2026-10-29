@@ -149,7 +149,8 @@ if charging and screen_off:
 ## 八、错误处理
 
 ```python
-from brain_memory import ClosedError, DatabaseError, LockTimeoutError, ValueError
+from brain_memory import ClosedError, DatabaseError, LockTimeoutError
+# ValueError 是内置异常，不在包的导出里 —— 从 brain_memory 导入会 ImportError
 
 try:
     db.ingest(sid, "user", text)
@@ -281,9 +282,12 @@ db = bm.MemoryDB(path, {"embedding_callable": embed, "vec_dim": 768})
 纯 Python 扫 5000 条约 200ms。
 
 ```python
-# 换模型后重建向量（Phase 2 提供的运维方式）
-for atom_id, content in db._writer.execute("SELECT id, content FROM atoms WHERE state='active'"):
-    db.vector_store.index_atom(db._writer, atom_id, content)
+# 换模型后重建向量 —— 用公开方法，别碰 db._writer（那会绕过锁与事务）
+n = db.reindex_vectors()          # 全量，内部分批（每批 500 条一个事务）
+print("重建完成：%d 条" % n)
+
+# 只想重建一部分（比如先跑 500 条看看）
+# db.reindex_vectors(limit=500)
 ```
 
 ---

@@ -1,5 +1,36 @@
 # 更新记录
 
+## v1.3.0 —— 2026-10-29
+
+第四轮审计：查 `docs/EMBEDDING.md` 与 `docs/PLAN.md` 时查出三处真问题。
+
+### 新增 `reindex_vectors()`
+
+换 embedding 模型（维度或语义变了）之后必须重算所有向量，否则新旧混在一起、余弦没有可比性。
+以前文档教用户直接调 `db._writer` 和 `db.vector_store.index_atom()` —— 那是私有属性，绕过锁与事务。
+现在有公开方法，内部分批（每批 500 条一个事务），大库不会开超长写事务。
+
+```python
+n = db.reindex_vectors()          # 全量
+db.reindex_vectors(limit=500)     # 只跑 500 条
+```
+
+### `FACT_TYPES` 补上 `convention`
+
+门控的 `SIGNAL_WORDS` 一直有 `convention`（项目惯例）这个类别，但白名单 `FACT_TYPES` 里没有它。
+后果：`remember(fact_type="convention")` 会被**静默归一成 `fact`**，而 `facts(fact_types=["convention"])`
+能查到门控产出的、查不到 remember 写入的 —— 同一类型两种命运。
+
+### `__version__` 从 `0.1.0` 对齐到当前版本
+
+`brain_memory.__version__` 一直停在 `0.1.0`，而 `pyproject.toml` 已经是 1.2.2。
+新增 `tests/test_version.py` 钉死这两处一致，以后不会再漂。
+
+### 文档
+
+- `EMBEDDING.md`：`from brain_memory import ValueError` 会 ImportError（那是内置异常），已改
+- `EMBEDDING.md`：重建向量的示例改用公开方法
+- `PLAN.md`：`user_version` 由 1 更正为 2；vec0 与 entity_pages 的描述对齐现状
 ## v1.2.2 —— 2026-10-29
 
 工具链与文档，**没有代码行为变更**。

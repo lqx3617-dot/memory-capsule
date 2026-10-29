@@ -11,7 +11,10 @@ LAYERS = ("L0", "L1", "L2", "L3")
 ROLES = ("user", "assistant", "system", "tool")
 DEFAULT_ROLE = "user"
 
-FACT_TYPES = ("fact", "decision", "task", "preference", "constraint", "bugroot")
+# 注意：convention（项目惯例）是门控 SIGNAL_WORDS 会产出的类型，
+# 早先漏在白名单外，导致 remember(fact_type="convention") 被抹成 fact。
+FACT_TYPES = ("fact", "decision", "task", "preference", "constraint",
+              "convention", "bugroot")
 CANDIDATE_STATUS = ("pending", "promoted", "rejected", "merged")
 ATOM_STATES = ("active", "silent", "archived", "superseded")
 FORGET_ACTIONS = ("silent", "archive", "unlink")
@@ -42,6 +45,7 @@ HALFLIFE_BUCKET = {
     "fact": "semantic",
     "decision": "semantic",
     "constraint": "semantic",
+    "convention": "semantic",
     "bugroot": "procedural",
     "task": "episodic",
     "preference": "procedural",

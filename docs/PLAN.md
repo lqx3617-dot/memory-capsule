@@ -45,7 +45,7 @@
 
 ---
 
-## 3. Schema 定稿（`user_version = 1`）
+## 3. Schema 定稿（本文写于 v1 时期；当前 `user_version = 2`，差异见下）
 
 ### 3.1 raw_events（L0）
 
@@ -117,9 +117,11 @@ action 枚举：`ingest` `gate_reject` `gate_llm_fallback` `promote` `merge` `co
 
 Phase 1 只建 `entity_pages(id, entity_id, markdown, dirty, updated_at)` 空表；`atoms_vec`（vec0）**不建**，等 Phase 2 且探测通过才建。
 
+> 现状：vec0 在 sqlite-vec 可用时会建，不可用则降级；向量本体存在 `atoms.embedding`，vec0 只是可选加速索引。
+
 ### 3.8 迁移
 
-`PRAGMA user_version` 记录版本；`0 → 1` 建全表。读到高于本库支持的版本 → 抛 `SchemaVersionError`，**不自动降级、不改库**。
+`PRAGMA user_version` 记录版本；`0 → 2` 建全表（v1 → v2 增加 `atoms.embedding`）。读到高于本库支持的版本 → 抛 `SchemaVersionError`，**不自动降级、不改库**。
 
 ---
 

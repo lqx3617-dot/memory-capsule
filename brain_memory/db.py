@@ -943,6 +943,41 @@ class MemoryDB:
             forget_apply(self, decisions)
         return [d.as_dict() for d in decisions]
 
+    def reindex_vectors(self, limit: int | None = None) -> int:
+        """按当前 embedder 重算活跃原子的向量，返回成功条数。
+
+        换 embedding 模型（维度或语义变了）之后必须调一次 —— 否则新旧向量混在一起，
+        余弦相似度没有可比性，检索结果会莫名其妙地偏。
+
+        内部按批处理（每批 500 条一个事务），大库不会开一个超长写事务。
+        limit 只作总量上限，None 表示全量重建。
+        """
+        self._ensure_open()
+        store = self._vectors
+        if store is None or store.backend == "none":
+            return 0
+        batch = 500
+        done = 0
+        last_id = 0
+        while True:
+            with self._write_tx() as conn:
+                rows = conn.execute(
+                    "SELECT id, content FROM atoms WHERE state = 'active' AND id > ? "
+                    "ORDER BY id LIMIT ?",
+                    (last_id, batch),
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    if store.index_atom(conn, int(row[0]), str(row[1])):
+                        done += 1
+                last_id = int(rows[-1][0])
+            if limit is not None and done >= int(limit):
+                break
+        if done:
+            logger.info("记忆胶囊: 向量重建 %d 条（backend=%s）", done, store.backend)
+        return done
+
     def dream(self, *, persist: bool = True, max_atoms: int | None = None) -> str:
         """执行一次巩固：聚类高质量原子 -> L3 实体页 + DREAMS.md，返回 Markdown 文本。"""
         self._ensure_open()
