@@ -17,12 +17,20 @@ SELECT ... FROM atoms WHERE state IN ('active','silent','archived') ORDER BY id
 
 老库不需要 bump `user_version`：`_ensure_indexes()` 用 `CREATE INDEX IF NOT EXISTS` 幂等补齐。
 
-### 新增 `tests/test_query_plan.py`
+### 试过但放弃的：查询计划回归测试
 
-静态读代码判断不了 SQLite 走哪条路。这个测试灌 400 条、跑 `ANALYZE`，然后直接问
-`EXPLAIN QUERY PLAN`，断言六类关键查询（forget / 引用计数 / dream / 去重 / stats）都不退化成裸全表扫。
+先用 `EXPLAIN QUERY PLAN` 写了个断言「关键查询走某条索引」的测试，跑了两轮 CI 后放弃：
 
-### 发现但未动的：三个疑似死索引
+| 数据分布 | 优化器的选择 |
+|---|---|
+| 400 条全是 `active` | 全表扫（选择性 100%，扫全表本来就更快） |
+| 混合 state | 可能走索引，也可能不走 |
+
+**优化器的选择依赖数据分布，而真实库的分布千变万化** —— 这种断言只能产出噪音。
+改成 `tests/test_indexes.py`：只守「schema 声明的索引在库里都存在」，并给每个索引标注它服务哪条查询。
+走不走由优化器按数据决定，人不去替它拍板。
+
+### 发现但未动的：几个疑似死索引
 
 | 索引 | 情况 |
 |---|---|

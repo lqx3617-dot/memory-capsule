@@ -392,7 +392,7 @@ sh check.sh --full   # 再加 17 个测试脚本 + examples/embed_demo.py
 | `test_version` | `pyproject.toml` 与 `__version__` 不许漂移 |
 | `test_reindex` | `reindex_vectors()` 可用、`convention` 能存能查 |
 | `test_journal` | journal 里出现的 action 必须都已声明（审计完整性） |
-| `test_query_plan` | 关键查询不许退化成全表扫（EXPLAIN QUERY PLAN 实跑） |
+| `test_indexes` | schema 声明的索引在库里都存在，并标注各自服务哪条查询 |
 | `embed_demo` | 全流程演示 |
 
 CI 在 Python 3.10 / 3.11 / 3.12 / 3.13 四档跑全套。
