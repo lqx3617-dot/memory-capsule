@@ -155,7 +155,9 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
     text = "\n".join(header + body + footer)
 
     if persist:
-        _persist(db, pages, text, len(atoms), cfg)
+        # 只有全量扫描、且没被 dream_max_clusters 截断，才能断定「没出现在 pages 里的实体页该删」
+        prune = max_atoms is None and len(pages) < int(cfg.dream_max_clusters)
+        _persist(db, pages, text, len(atoms), cfg, prune=prune)
 
     return text
 
@@ -166,6 +168,7 @@ def _persist(
     text: str,
     atom_count: int,
     cfg: Any,
+    prune: bool = True,
 ) -> None:
     written = 0
     with db._write_tx() as conn:
@@ -183,6 +186,22 @@ def _persist(
                 written += 1
             except Exception:
                 continue
+        # ⚠ 2026-10-29：原来只 upsert，从不清理 —— 实体改名或原子全被归档之后，
+        # 旧页会永远留在 entity_pages 和 DREAMS.md 里，越跑越多。
+        # 只有「全量扫描且没被 dream_max_clusters 截断」时才敢清理：
+        # 否则本次没生成的页不代表它该消失。
+        pruned = 0
+        if prune:
+            keep = [int(p["key"]) for p in pages if p["kind"] == "entity"]
+            if keep:
+                marks = ",".join("?" * len(keep))
+                cur = conn.execute(
+                    "DELETE FROM entity_pages WHERE entity_id NOT IN (" + marks + ")",
+                    tuple(keep),
+                )
+            else:
+                cur = conn.execute("DELETE FROM entity_pages")
+            pruned = int(cur.rowcount or 0)
         db._journal(
             conn,
             "dream",
@@ -192,6 +211,7 @@ def _persist(
                 "atoms": atom_count,
                 "pages": len(pages),
                 "entity_pages_written": written,
+                "entity_pages_pruned": pruned,
                 "chars": len(text),
             },
         )
@@ -200,8 +220,17 @@ def _persist(
     if not path and db.path and db.path != ":memory:":
         path = os.path.join(os.path.dirname(os.path.abspath(db.path)), "DREAMS.md")
     if path:
+        # 先写临时文件再 rename：直接 open(path, "w") 覆盖，写到一半崩掉
+        # 会把上一份完好的 DREAMS.md 留成半截。
+        tmp = path + ".tmp"
         try:
-            with open(path, "w", encoding="utf-8") as fh:
+            with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
         except OSError:
-            pass
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass

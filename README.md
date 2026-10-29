@@ -371,7 +371,7 @@ python -m brain_memory --db mem.db --config journal_mode_target=DELETE stats
 
 ```bash
 sh check.sh          # 静态扫描 + 文档代码块 + 语法编译 + 真建库体检
-sh check.sh --full   # 再加 20 个测试脚本 + examples/embed_demo.py
+sh check.sh --full   # 再加 21 个测试脚本 + examples/embed_demo.py
 ```
 
 | 脚本 | 钉死的问题 |
@@ -396,6 +396,7 @@ sh check.sh --full   # 再加 20 个测试脚本 + examples/embed_demo.py
 | `test_concurrency` | 锁重入 / 嵌套事务 / 多进程共用库 / 并发 close |
 | `test_conflict` | 冲突判据两侧都钉住：该抓的抓、不该抓的不误伤 |
 | `test_migration` | v1 老库原地升级、未来版本拒绝、旧配置报错、`extract_llm_*` 回落 |
+| `test_dream` | 孤儿实体页清理、`persist=False` 不写库、DREAMS.md 原子落盘 |
 | `embed_demo` | 全流程演示 |
 
 CI 在 Python 3.10 / 3.11 / 3.12 / 3.13 四档跑全套。
@@ -441,7 +442,7 @@ mcp_server.py      MCP 服务器（7 工具，stdio + HTTP）
 memory_proxy.py    OpenAI 兼容记忆代理（自动注入 + 回写）
 scripts/           Termux 保活脚本 + 审查自查
 docs/              MCP / PLAN / PUBLIC_API / EMBEDDING / AGENT_RULES
-tests/             20 个测试脚本
+tests/             21 个测试脚本
 examples/          DSH 与 Operit 的接入配置示例
 ```
 
