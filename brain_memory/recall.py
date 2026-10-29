@@ -98,7 +98,13 @@ def _estimate_tokens(text: str, chars_per_token: float) -> int:
     return max(1, int(math.ceil(len(text) / max(0.1, chars_per_token))))
 
 
-def _like_fallback(conn, query: str, limit: int, min_quality: float) -> list:
+def _like_fallback(conn, query: str, limit: int) -> list:
+    """FTS 零命中时的兜底。
+
+    ⚠ 2026-10-29 实测：原来这里按 quality 过滤并排序，而那个值是**写入快照**，
+    会先砍掉「存储值偏低但现算偏高」的条目，和「quality 一律现场重算」的约定冲突。
+    现在只按 id 倒序取候选，过滤与排序全部交给调用方现算。
+    """
     toks = tokenize(query)[:3]
     if not toks:
         return []
@@ -107,10 +113,10 @@ def _like_fallback(conn, query: str, limit: int, min_quality: float) -> list:
     sql = (
         "SELECT id, content, source_event_id, confidence, quality, fact_type, "
         "entity_id, access_count, feedback, created_at, last_accessed_at, 0.0 AS rank "
-        "FROM atoms WHERE state = 'active' AND quality >= ? AND (" + where + ") "
-        "ORDER BY quality DESC LIMIT ?"
+        "FROM atoms WHERE state = 'active' AND (" + where + ") "
+        "ORDER BY id DESC LIMIT ?"
     )
-    return conn.execute(sql, tuple([min_quality] + params + [limit])).fetchall()
+    return conn.execute(sql, tuple(params + [limit])).fetchall()
 
 
 def _rrf(rankings: list[list[int]], k: int) -> dict[int, float]:
@@ -360,7 +366,8 @@ def search(
         # ---- 路 1b：FTS 零命中时 LIKE 兜底 ----
         if not fts_ranked and cfg.enable_like_fallback:
             try:
-                rows = _like_fallback(conn, text, candidate_limit, floor_quality)
+                # 现算质量在 Python 侧过滤，候选要给够，否则过滤后可能空手而归
+                rows = _like_fallback(conn, text, max(candidate_limit, top_k * 8))
             except Exception:
                 rows = []
             for row in rows:

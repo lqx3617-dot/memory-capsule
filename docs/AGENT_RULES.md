@@ -1,3 +1,19 @@
+> **本文是 v1.0 立项时的原始需求书，原文一字未改。**
+>
+> 里面的「第一阶段 / 第二阶段」「Phase 1 / Phase 2」是当时的排期，**截至 1.2.1 已全部落地**。
+> 读的时候注意这几处与当前实现的差异，以代码为准：
+>
+> | 原文说 | 现在实际 |
+> |---|---|
+> | 「核心 API 只有五个」 | 七个：原五个签名未变，新增 `remember`（跳过门控）与 `facts`（按类型列举） |
+> | 「connectivity：被 EntityPage 或其他原子引用数」 | `supersedes` 引用数**只在 `forget` 扫描里统计**；`recall` / `facts` / `dream` 传 `refs=0`，只用 `access_count`。v1.1.0 前连 `access_count` 都没算，因子恒为 1 |
+> | 「向量列（第二阶段）用 sqlite-vec 的 vec0 虚拟表」 | 向量主存在 `atoms.embedding`（float32 BLOB），vec0 只是**可选加速索引** —— 换后端不用重建数据 |
+> | 「第一阶段只做 FTS5 关键词召回」 | 已是 FTS5 + 向量双路，RRF 融合 |
+> | 「L3 / dream / 向量放第二阶段」 | 已实现 |
+>
+> 另有两条后来补充的约定，原文里没有：**quality 一律现场重算**（存储值只是写入快照；唯一例外是 `stats().avg_quality`，它统计的就是快照平均值）、
+> **门控只记用户说的话**（assistant 复述不算用户偏好）。
+
 # 角色
 你是一名资深后端工程师，正在为一个运行在 Android PRoot 环境
 （Termux + proot-distro，aarch64 Linux 用户态，非真容器、无内核隔离）

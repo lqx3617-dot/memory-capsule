@@ -792,12 +792,13 @@ class MemoryDB:
         if session_id:
             sql += " AND e.session_id = ?"
             params.append(session_id)
-        sql += (" ORDER BY a.quality DESC, a.id ASC LIMIT ?")
-        # 2026-10-27：id 从 DESC 改 ASC。
-        # 原来同质量时取最新的，结果最近的垃圾（「爱玩梗」「复读机」）
-        # 把早期的核心事实（名字、爱好）全挤出了 12 条预算。
-        # 早期建立的通常是真正的身份信息，越后面越是口水话。
-        params.append(max(1, int(limit)) * 4)
+        sql += " ORDER BY a.id ASC LIMIT ?"
+        # 2026-10-27：id 从 DESC 改 ASC —— 同质量时取最早的，早期建的是身份信息，
+        # 越往后越是口水话（「爱玩梗」「复读机」），不能把核心事实挤出预算。
+        # ⚠ 2026-10-29：不能按 a.quality 排序预筛 —— 那是写入快照，会先砍掉
+        # 「存储值偏低但现算偏高」的条目。排序与过滤都在下面 Python 侧按 live_quality 做。
+        # 窗口给宽：facts 是「列举」不是「检索」，候选不够会导致过滤后空手而归。
+        params.append(max(1000, max(1, int(limit)) * 20))
 
         out: list[Memory] = []
         try:

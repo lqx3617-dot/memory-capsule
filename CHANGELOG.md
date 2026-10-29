@@ -1,5 +1,33 @@
 # 更新记录
 
+## v1.2.2 —— 2026-10-29
+
+工具链与文档，**没有代码行为变更**。
+
+### 新增 review-gate：合并前必须清空审查意见
+
+起因：v1.2.0 之前三轮 PR 在没读自动审查意见的情况下被合并，其中一条是 **P1**
+（MCP HTTP 端点缺 `Origin` 校验，网页可借 DNS rebinding 读写本机记忆）。
+
+- `.github/workflows/review-gate.yml`：查 `reviewThreads`，有未 resolve 的 bot 意见就红
+- `.github/pull_request_template.md`：合并前检查清单
+- `scripts/check_review_findings.py`：本地自查
+- `main` 开启分支保护：五个必过检查 + 未 resolve 的对话无法合并 + 禁强推
+
+实现上踩过三个坑，都写进注释了：GraphQL 的 bot `login` 不带 `[bot]` 后缀（必须认 `__typename`）、
+`workflow_dispatch` 产生的 check 不计入 PR 的 required checks、分页翻不完必须 fail closed。
+
+### 文档准确性审计（两轮）
+
+拿代码反核文档，改了这些：
+
+- **配置项 69 → 74**：漏数了 `extract_llm_*` 五项（主从模型分离）
+- **「没有 HTTP 服务」**：对包成立，对仓库不成立（`mcp_server --http` 与 `memory_proxy` 会监听 127.0.0.1）
+- **出站条件写精确**：光开 `enable_llm_gate` 不够，还要 endpoint + model，且只在置信度边界区间才调
+- **`PUBLIC_API.md` 补 `remember` / `facts`**：两个核心 API 此前完全没有文档
+- **escalation 契约**：补上「只在 L2 结果不足 `top_k` 时才下探」这个前提
+- **「永不物理删除」**：改成「默认不改库；物理删除是显式选项，`allow_hard_delete` 默认 True」
+- `PLAN.md` 标注为 v1.0 历史计划；`AGENT_RULES.md` 加「原文未改，差异以代码为准」对照表
 ## v1.2.1 —— 2026-10-29
 
 修 Codex 在 PR #1 / #2 / #3 上提的 9 条意见（全部成立，逐条对应）。
