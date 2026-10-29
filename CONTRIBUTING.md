@@ -42,6 +42,7 @@ MCP 的 HTTP 端点不校验 Origin，任何网页都能借 DNS rebinding 打到
 | 每条 bot 行内意见必须点 Resolve conversation | .github/workflows/review-gate.yml 查 GraphQL reviewThreads，未解决就红 |
 | 确实不该改的 | 在 thread 里写理由，再 resolve —— 别硬改，也别硬合 |
 | 紧急放行 | 打 review-gate:skip 标签，会在 step summary 留痕 |
+| 意见处理完但 check 还是红 | 在 thread 里**回一句话**（触发重跑），或到 Actions 里点 **Re-run jobs**。别用 workflow_dispatch —— 它产生的 check 不计入 PR 的 required status checks，清不了红 |
 | 本地先看 | GITHUB_TOKEN=... python3 scripts/check_review_findings.py 5 |
 
 顺序固定：**读意见 → 逐条处置 → Resolve → 再看 CI 绿不绿**。
