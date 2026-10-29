@@ -1,0 +1,112 @@
+name: review-gate
+
+# 合并前必须清空 bot 的审查意见。
+# 起因：v1.2.0 之前三轮 PR 在没读 Codex 意见的情况下被合并，
+# 其中 mcp_server 的 HTTP 端点缺 Origin 校验（P1，DNS rebinding 可读写记忆）。
+#
+# 触发器必须覆盖「意见晚到」的时序：Codex 常常在本 workflow 跑完之后才贴意见，
+# 所以除了 PR 本身的事件，还要订阅 review 与行内评论事件。
+# 线程 resolve 在 Actions 里没有对应触发器（pull_request_review_thread 是 webhook-only），
+# 因此提供 workflow_dispatch 作为手动重跑通道。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR 号（手动重跑时填）'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  bot-findings:
+    name: 未处理的审查意见
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 bot 行内意见是否都已 resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const payloadPr = context.payload.pull_request;
+            const manual = (context.payload.inputs && context.payload.inputs.pr) || '';
+            const number = payloadPr ? payloadPr.number : parseInt(manual, 10);
+            if (!number) {
+              core.setFailed('拿不到 PR 号；手动触发时请在 pr 输入框填数字');
+              return;
+            }
+
+            const labels = (payloadPr && payloadPr.labels ? payloadPr.labels : []).map((l) => l.name);
+            if (labels.includes('review-gate:skip')) {
+              core.notice('已打 review-gate:skip 标签，跳过检查（summary 留痕）');
+              await core.summary.addHeading('review-gate 已跳过').addRaw('PR 打了 review-gate:skip 标签。').write();
+              return;
+            }
+
+            const query = [
+              'query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {',
+              '  repository(owner: $owner, name: $repo) {',
+              '    pullRequest(number: $number) {',
+              '      reviewThreads(first: 100, after: $cursor) {',
+              '        pageInfo { hasNextPage endCursor }',
+              '        nodes {',
+              '          isResolved',
+              '          isOutdated',
+              '          comments(first: 1) {',
+              '            nodes { author { login __typename } path line body }',
+              '          }',
+              '        }',
+              '      }',
+              '    }',
+              '  }',
+              '}',
+            ].join('\n');
+
+            // 分页：超过 100 条 thread 时第一页之外的意见会被静默漏掉
+            let threads = [];
+            let cursor = null;
+            for (let page = 0; page < 20; page++) {
+              const res = await github.graphql(query, { owner, repo, number, cursor });
+              const rt = res.repository.pullRequest.reviewThreads;
+              threads = threads.concat(rt.nodes || []);
+              if (!rt.pageInfo.hasNextPage) break;
+              cursor = rt.pageInfo.endCursor;
+            }
+
+            const pending = threads.filter((t) => {
+              if (t.isResolved) return false;
+              const first = (t.comments.nodes || [])[0];
+              if (!first || !first.author) return false;
+              // GraphQL 里 bot 的 login 是 chatgpt-codex-connector（不带 [bot]），
+              // 只看 login 后缀会永远判 false，闸门变假绿。必须认 __typename。
+              const a = first.author;
+              return a.__typename === 'Bot' || (a.login || '').endsWith('[bot]');
+            });
+
+            if (!pending.length) {
+              core.notice('没有未处理的 bot 审查意见（共检查 ' + threads.length + ' 条 thread）');
+              return;
+            }
+
+            const items = pending.map((t) => {
+              const c = t.comments.nodes[0];
+              const head = (c.body || '').split('\n')[0].replace(/[*_]/g, '').slice(0, 110);
+              const where = (c.path || '(文件级)') + ':' + (c.line == null ? '?' : c.line);
+              return where + ' — ' + head;
+            });
+
+            await core.summary
+              .addHeading('还有 ' + pending.length + ' 条 bot 审查意见没有解决')
+              .addList(items)
+              .addRaw('逐条处理后在 GitHub 上点 Resolve conversation；确实不该改的，在 thread 里写理由再 resolve。resolve 后可用 workflow_dispatch 手动重跑本检查。')
+              .write();
+
+            core.setFailed('还有 ' + pending.length + ' 条 bot 审查意见未 resolve，不能合并。');
