@@ -111,6 +111,16 @@ def main() -> int:
     check(not errors, "4 个线程同时 close 没有异常" + ("" if not errors else "：" + str(errors[0])))
     check(db.is_closed, "最终处于已关闭状态")
 
+    # close 的承诺之一是「停掉 flusher」。如果它还在跑，进程退出阶段就会去碰
+    # 已经关掉的连接 —— 那正是「断言全过但退出码非 0」最可能的来源。
+    import time
+    for _ in range(50):
+        alive = [th.name for th in threading.enumerate() if th.name.startswith("brain_memory")]
+        if not alive:
+            break
+        time.sleep(0.02)
+    check(not alive, "close 之后没有残留的 brain_memory 线程" + ("" if not alive else "：" + str(alive)))
+
     print("5. 关闭后再调用要抛 ClosedError，不能静默")
     try:
         db.ingest("s", "user", "关闭后的写入")
@@ -123,11 +133,19 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # ⚠ 2026-10-29：在 py3.12 的 CI 上出现过「测试自己打印全部通过、check.sh 却判失败」——
-    # 也就是退出码非 0 但 FAILS 为空。解释器关闭阶段还有 flusher 线程与子进程的清理，
-    # 那里出的问题不该算到这个测试头上。这里显式 flush 后用 os._exit 交确定的退出码，
-    # 把「测试结果」和「解释器清理」两件事分开。
-    _code = main()
+    # ⚠ 2026-10-29：CI 上出现过「测试自己打印全部通过、check.sh 却判失败」——
+    # 退出码非 0 但 FAILS 为空。说明被测代码没崩，是测试进程的收尾阶段出了问题
+    # （flusher 线程、子进程回收、解释器关闭顺序）。
+    #
+    # 处理原则：**退出码只反映断言结果**。
+    # 1) 任何异常都打印 traceback（不然下次还是只有一个非 0 退出码，什么也看不出来）
+    # 2) 正常走完就 os._exit(0)，绕过解释器关闭阶段
+    import traceback
+    try:
+        _code = main()
+    except BaseException:
+        traceback.print_exc()
+        _code = 1
     try:
         sys.stdout.flush()
         sys.stderr.flush()
