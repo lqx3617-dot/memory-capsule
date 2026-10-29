@@ -1,0 +1,27 @@
+{
+  "_comment": "Operit AI MCP 配置示例。endpoint 形态随版本不同，两种二选一，以能连通为准。",
+  "http_transport": {
+    "name": "brain-memory",
+    "endpoint": "http://127.0.0.1:8788/mcp",
+    "description": "记忆胶囊 · 长期记忆（SQLite 单文件，纯本地）",
+    "capabilities": [
+      "tools"
+    ],
+    "extraData": {
+      "transport": "streamable-http",
+      "start": "python3 mcp_server.py --db ~/.brain-memory/memory.db --http 8788"
+    }
+  },
+  "command_transport": {
+    "name": "brain-memory",
+    "endpoint": "python3 /data/data/com.termux/files/home/memory-capsule/mcp_server.py --db /data/data/com.termux/files/home/.brain-memory/memory.db",
+    "description": "记忆胶囊 · 长期记忆（stdio 子进程）",
+    "capabilities": [
+      "tools"
+    ],
+    "extraData": {
+      "transport": "stdio",
+      "note": "只有当你的 Operit 版本支持本地命令端点时可用"
+    }
+  }
+}
