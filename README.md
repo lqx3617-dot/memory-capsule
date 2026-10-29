@@ -51,9 +51,18 @@
 | 用法 | 监听端口 | 出站网络 |
 |---|---|---|
 | `import brain_memory`（库） | 不开 | 不开（除非你配了 `enable_llm_gate` 或 `embedding_backend=http`） |
-| `mcp_server.py`（stdio，默认） | 不开 | 不开 |
-| `mcp_server.py --http 8788` | 开 `127.0.0.1:8788` | 不开 |
+| `mcp_server.py`（stdio，默认） | 不开 | 默认不开（例外见下方注） |
+| `mcp_server.py --http 8788` | 开 `127.0.0.1:8788` | 默认不开（例外见下方注） |
 | `memory_proxy.py` | 开 `127.0.0.1:8790` | **会**（要转发到上游 LLM） |
+
+> **注**：上面「出站网络」一列说的是**默认配置**。要真的产生出站，光把开关打开不够 ——
+>
+> - **门控调 LLM**：要 `enable_llm_gate=True` **且** 配了 `llm_endpoint` + `llm_model`，
+>   而且只在置信度落在边界区间（0.42 ≤ conf < 0.78）时才真的发请求，高置信度和低置信度都走纯规则。
+> - **远程 embedding**：要 `embedding_backend="http"` **且** 配了 `embedding_endpoint` + `embedding_model`，
+>   缺任何一个 `resolve_embedder()` 都返回 None —— 结果是**完全不做向量**（`vector_backend=none`），退回纯 FTS5，而不是换成本地哈希。都不出网。
+>
+> 这两条链默认都是关的：`enable_llm_gate=False`、`embedding_backend="hash"`。
 
 想要绝对零端口：只用库，或者 MCP 走 stdio 模式（宿主拉子进程，不走网络）。
 两个脚本的监听地址默认都是 `127.0.0.1`，不对外；`--host` 可以改，但别改成 `0.0.0.0`。
