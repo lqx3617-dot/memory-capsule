@@ -105,6 +105,7 @@ class MemoryDB:
 
         self._access_lock = threading.Lock()
         self._access_delta: dict[int, int] = {}
+        self._tx_local = threading.local()   # 记录本线程是否已在写事务里
 
         self._stop = threading.Event()
         self._flush_wakeup = threading.Event()
@@ -478,8 +479,17 @@ class MemoryDB:
 
     @contextmanager
     def _write_tx(self, allow_closing: bool = False) -> Iterator[sqlite3.Connection]:
-        """写事务：单写连接 + 写锁 + BEGIN IMMEDIATE / COMMIT / ROLLBACK。"""
+        """写事务：单写连接 + 写锁 + BEGIN IMMEDIATE / COMMIT / ROLLBACK。
+
+        **不可重入**：嵌套调用会走到底下的 `if conn.in_transaction: ROLLBACK`，
+        把外层事务静默回滚掉。这里用线程局部深度提前拒绝，别让它变成
+        「锁等 5 秒超时」那种看不出原因的故障。
+        """
         assert self._sync is not None and self._writer is not None
+        depth = getattr(self._tx_local, "depth", 0)
+        if depth:
+            raise DatabaseError("不支持嵌套写事务：_write_tx 不可重入")
+        self._tx_local.depth = depth + 1
         self._begin_op(allow_closing=allow_closing)
         try:
             with self._sync.write(self._lock_timeout()):
@@ -511,6 +521,7 @@ class MemoryDB:
                             pass
                         raise DatabaseError(f"提交事务失败: {exc}") from exc
         finally:
+            self._tx_local.depth = 0
             self._end_op()
 
     @contextmanager
