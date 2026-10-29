@@ -64,6 +64,7 @@ def pending_threads(number: int, token: str) -> tuple[str, list[dict]]:
     out: list[dict] = []
     title = ""
     cursor = None
+    exhausted = False
     for _page in range(20):          # 分页：超过 100 条 thread 时不能只看第一页
         data = _call("/graphql", token, {
             "query": QUERY,
@@ -90,8 +91,11 @@ def pending_threads(number: int, token: str) -> tuple[str, list[dict]]:
             out.append(comment)
         page = block.get("pageInfo") or {}
         if not page.get("hasNextPage"):
+            exhausted = True
             break
         cursor = page.get("endCursor")
+    if not exhausted:
+        raise RuntimeError("reviewThreads 超过 2000 条，分页被截断，无法确认是否有未处理意见")
     return title, out
 
 

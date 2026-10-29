@@ -7,7 +7,8 @@ name: review-gate
 # 触发器必须覆盖「意见晚到」的时序：Codex 常常在本 workflow 跑完之后才贴意见，
 # 所以除了 PR 本身的事件，还要订阅 review 与行内评论事件。
 # 线程 resolve 在 Actions 里没有对应触发器（pull_request_review_thread 是 webhook-only），
-# 因此提供 workflow_dispatch 作为手动重跑通道。
+# 解法是「在 thread 里回一句话」——回复会触发 pull_request_review_comment[created]，gate 自动重跑。
+# 不要用 workflow_dispatch：它产生的 check 不计入 PR 的 required status checks，清不了红。
 
 on:
   pull_request:
@@ -16,11 +17,6 @@ on:
     types: [submitted, dismissed]
   pull_request_review_comment:
     types: [created, edited, deleted]
-  workflow_dispatch:
-    inputs:
-      pr:
-        description: 'PR 号（手动重跑时填）'
-        required: true
 
 permissions:
   contents: read
@@ -37,10 +33,9 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const payloadPr = context.payload.pull_request;
-            const manual = (context.payload.inputs && context.payload.inputs.pr) || '';
-            const number = payloadPr ? payloadPr.number : parseInt(manual, 10);
+            const number = payloadPr && payloadPr.number;
             if (!number) {
-              core.setFailed('拿不到 PR 号；手动触发时请在 pr 输入框填数字');
+              core.setFailed('这个事件里没有 pull_request，检查 on: 触发器');
               return;
             }
 
@@ -70,15 +65,22 @@ jobs:
               '}',
             ].join('\n');
 
-            // 分页：超过 100 条 thread 时第一页之外的意见会被静默漏掉
+            // 分页：超过 100 条 thread 时第一页之外的意见会被静默漏掉。
+            // 翻到页数上限还没到底 -> 直接失败（fail closed），不许「没翻完就说没问题」。
+            const MAX_PAGES = 20;
             let threads = [];
             let cursor = null;
-            for (let page = 0; page < 20; page++) {
+            let exhausted = false;
+            for (let page = 0; page < MAX_PAGES; page++) {
               const res = await github.graphql(query, { owner, repo, number, cursor });
               const rt = res.repository.pullRequest.reviewThreads;
               threads = threads.concat(rt.nodes || []);
-              if (!rt.pageInfo.hasNextPage) break;
+              if (!rt.pageInfo.hasNextPage) { exhausted = true; break; }
               cursor = rt.pageInfo.endCursor;
+            }
+            if (!exhausted) {
+              core.setFailed('reviewThreads 超过 ' + (MAX_PAGES * 100) + ' 条，分页被截断，无法确认是否有未处理意见。请人工检查这个 PR。');
+              return;
             }
 
             const pending = threads.filter((t) => {
@@ -106,7 +108,7 @@ jobs:
             await core.summary
               .addHeading('还有 ' + pending.length + ' 条 bot 审查意见没有解决')
               .addList(items)
-              .addRaw('逐条处理后在 GitHub 上点 Resolve conversation；确实不该改的，在 thread 里写理由再 resolve。resolve 后可用 workflow_dispatch 手动重跑本检查。')
+              .addRaw('逐条处理后在 GitHub 上点 Resolve conversation；确实不该改的，在 thread 里写理由再 resolve。resolve 之前先在 thread 里回一句 —— 那会触发重跑；或到 Actions 里点 Re-run jobs。')
               .write();
 
             core.setFailed('还有 ' + pending.length + ' 条 bot 审查意见未 resolve，不能合并。');
