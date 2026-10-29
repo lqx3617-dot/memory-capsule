@@ -39,7 +39,11 @@ class GlobalLock(_LockBase):
     name = "global"
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        # ⚠ 2026-10-29：原来用 threading.Lock，同线程嵌套读会自己等死（等满 timeout
+        # 再抛 LockTimeoutError，看起来像"别人占着锁"）。改 RLock 允许读重入；
+        # 写重入单独检测 —— 那会把外层事务回滚掉。
+        self._lock = threading.RLock()
+        self._write_owner: int | None = None
 
     @contextmanager
     def read(self, timeout: float = 5.0) -> Iterator[None]:
@@ -53,8 +57,17 @@ class GlobalLock(_LockBase):
 
     @contextmanager
     def write(self, timeout: float = 5.0) -> Iterator[None]:
+        tid = threading.get_ident()
+        if self._write_owner == tid:
+            raise LockOrderError(
+                "锁序错误：同一线程在写锁内又申请写锁（会让外层事务被回滚），已拒绝"
+            )
         with self.read(timeout):
-            yield
+            self._write_owner = tid
+            try:
+                yield
+            finally:
+                self._write_owner = None
 
 
 class WritePriorityRWLock(_LockBase):
@@ -67,6 +80,7 @@ class WritePriorityRWLock(_LockBase):
         self._readers = 0
         self._writer_active = False
         self._writers_waiting = 0
+        self._writer_tid: int | None = None
         self._reader_threads: dict[int, int] = {}
 
     # -- 内部 --
@@ -119,11 +133,16 @@ class WritePriorityRWLock(_LockBase):
                 raise LockOrderError(
                     "锁序错误：当前线程持有读锁时又申请写锁（必然自锁），已拒绝"
                 )
+            if self._writer_tid == tid:
+                raise LockOrderError(
+                    "锁序错误：同一线程在写锁内又申请写锁（会让外层事务被回滚），已拒绝"
+                )
             self._writers_waiting += 1
             try:
                 while self._writer_active or self._readers > 0:
                     self._wait(deadline, timeout)
                 self._writer_active = True
+                self._writer_tid = tid
             finally:
                 self._writers_waiting -= 1
                 self._cond.notify_all()
@@ -132,6 +151,7 @@ class WritePriorityRWLock(_LockBase):
         finally:
             with self._cond:
                 self._writer_active = False
+                self._writer_tid = None
                 self._cond.notify_all()
 
     # -- 观测 --
