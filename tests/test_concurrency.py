@@ -55,14 +55,18 @@ def main() -> int:
     print("3. 两个进程并发 open 同一个新库并写入")
     tmp = tempfile.mkdtemp(prefix="bm_conc_")
     db_path = os.path.join(tmp, "multi.db")
+    # 用随机串做内容：remember() 的去重很激进（相似度 0.9 + 无数字冲突就合并），
+    # 写「第 N 条」这种编号型文本会被并成一条，测不出并发行为。
     code = chr(10).join([
-        "import sys",
+        "import os, sys",
         "sys.path.insert(0, %r)" % ROOT,
         "import brain_memory as bm",
         "db = bm.MemoryDB(%r)" % db_path,
         "for i in range(20):",
-        "    db.remember('p', sys.argv[1] + ' 独有记忆 ' + str(i) + ' 号')",
+        "    db.remember('p', os.urandom(8).hex() + '-' + sys.argv[1])",
+        "before = db.stats().counts['l2_active']",
         "db.close()",
+        "print(sys.argv[1], before)",
     ])
     procs = []
     for tag in ("alpha", "beta"):
@@ -70,20 +74,26 @@ def main() -> int:
             [sys.executable, "-c", code, tag],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)))
     crashed = []
+    reported = {}
     for tag, proc in procs:
         out, err = proc.communicate(timeout=120)
-        if proc.returncode != 0:
+        if proc.returncode == 0:
+            reported[tag] = out.strip()
+        else:
             crashed.append("%s exit=%s %s" % (tag, proc.returncode, err.strip()[-200:]))
     check(not crashed, "两个进程都没崩" + ("" if not crashed else "：" + crashed[0]))
+    print("    子进程自报: " + str(reported))
 
     db = bm.MemoryDB(db_path)
     try:
-        n = db.stats().counts["l2_active"]
-        print("    [INFO] 合并后 atoms = %d" % n)
-        check(n >= 40, "两条进程各写 20 条，合并后 >= 40（实际 %d）" % n)
+        st = db.stats()
+        print("    [INFO] 合并后 atoms=%d candidates=%d raw=%d" % (
+            st.counts['l2_active'], st.counts['l1_promoted'] + st.counts['l1_pending'],
+            st.counts['l0_events']))
+        check(st.counts["l2_active"] >= 40,
+              "两条进程各写 20 条（内容随机不重复），合并后 >= 40（实际 %d）" % st.counts["l2_active"])
     finally:
         db.close()
-
     print("4. 多个线程同时 close 要幂等")
     db = bm.MemoryDB(":memory:")
     db.remember("s", "并发关闭测试用的一条记忆")
