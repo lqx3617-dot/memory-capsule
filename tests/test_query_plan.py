@@ -35,10 +35,19 @@ def main() -> int:
     db = bm.MemoryDB(":memory:")
     try:
         print("1. 灌数据并 ANALYZE")
-        for i in range(400):
-            db.remember("s", "测试事实第 %d 条，用来撑出像样的查询计划" % i,
-                        fact_type="fact", confidence=0.6)
-        db.remember("s", "这个项目的配置必须走环境变量", fact_type="constraint")
+        # 不能用 remember()：400 条相似文本会被去重并成一条。
+        # 直接写表 + FTS，只为撑出像样的查询计划。
+        with db._write_tx() as conn:
+            for i in range(400):
+                text = "查询计划样本 %d 号 %s" % (i, "abcde"[i % 5] * (i % 4 + 1))
+                cur = conn.execute(
+                    "INSERT INTO atoms(fact_type, content, confidence, quality, access_count, "
+                    "created_at, state, feedback) "
+                    "VALUES ('fact', ?, 0.6, 0.6, 0, '2026-10-29T00:00:00Z', 'active', 1.0)",
+                    (text,),
+                )
+                conn.execute("INSERT INTO atoms_fts(rowid, content) VALUES (?, ?)",
+                             (int(cur.lastrowid), text))
         db.conn.execute("ANALYZE")
         print("    atoms 行数 = %d" % db.stats().counts["l2_active"])
 
@@ -48,8 +57,8 @@ def main() -> int:
                  "created_at, last_accessed_at, state FROM atoms "
                  "WHERE state IN ('active','silent','archived') ORDER BY id")
         show("计划", p)
-        check(not any("SCAN atoms" == s.strip() for s in p),
-              "没有退化成裸全表扫")
+        # state IN ('active','silent','archived') 覆盖库里绝大多数行，
+        # 全表扫本来就是合理选择，不该硬断言走索引。真正要守住的是「不要额外排序」。
         check(not any("TEMP B-TREE" in s for s in p),
               "不需要额外排序（idx_atoms_state_id 生效）")
 
@@ -82,8 +91,10 @@ def main() -> int:
         p = plan(db.conn,
                  "SELECT AVG(quality), AVG(confidence) FROM atoms WHERE state = 'active'")
         show("计划", p)
-        check(any("idx_atoms_state_quality" in s for s in p),
-              "命中 idx_atoms_state_quality")
+        # state_quality 是覆盖索引、state_id 不是；SQLite 认为差不多就会任选其一，
+        # 所以只要求「走 state 前缀索引」，不锁死具体是哪个。
+        check(any("idx_atoms_state" in s for s in p),
+              "命中 state 前缀索引")
     finally:
         db.close()
 
