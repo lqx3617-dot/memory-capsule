@@ -147,6 +147,41 @@ def main() -> int:
         check(l0 >= 4, "两轮对话共写入 ≥4 条原始事件（实际 %d）" % l0)
         db.close()
 
+        print("4b. 纯图片消息：跳过 recall，仍注入长期偏好")
+        post(proxy_port, {"model": "m", "messages": [
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}]})
+        msgs = CAPTURED[-1].get("messages") or []
+        system_text = "\n".join(
+            str(m.get("content")) for m in msgs if m.get("role") == "system"
+        )
+        check("长期偏好与约束" in system_text, "纯图片轮次仍然注入偏好（Codex 指出的边界）")
+
+        print("4c. 注入预算：preference 与 recall 共用一份")
+        tiny = free_port()
+        proc3 = subprocess.Popen(
+            [sys.executable, PROXY, "--db", db_path,
+             "--upstream", "http://127.0.0.1:%d/v1" % up_port,
+             "--port", str(tiny), "--budget-tokens", "5"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            check(wait_ready(tiny, proc3), "小预算代理就绪")
+            post(tiny, {"model": "m", "messages": [
+                {"role": "user", "content": "PySide6 和 Qt 怎么选"}]})
+            msgs = CAPTURED[-1].get("messages") or []
+            system_text = "\n".join(
+                str(m.get("content")) for m in msgs if m.get("role") == "system"
+            )
+            check(len(system_text) < 120,
+                  "小预算下注入被截断（%d 字符）" % len(system_text))
+        finally:
+            proc3.terminate()
+            try:
+                proc3.wait(timeout=10)
+            except Exception:
+                proc3.kill()
+
         print("4. X-Memory: off 两头都不做")
         before = len(CAPTURED)
         post(proxy_port, {"model": "m", "messages": [

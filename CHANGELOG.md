@@ -1,5 +1,47 @@
 # 更新记录
 
+## v1.2.1 —— 2026-10-29
+
+修 Codex 在 PR #1 / #2 / #3 上提的 9 条意见（全部成立，逐条对应）。
+
+### P1 · 安全
+
+- `mcp_server.py --http`：补 **Origin 校验**。原来任何网页都能借 DNS rebinding 打到
+  `127.0.0.1`，读写用户记忆。现在只放行 localhost 系来源，其余 403；无 Origin 的
+  非浏览器客户端照常放行。
+
+### P2 · 协议一致性
+
+- HTTP `GET` 不再对所有路径回 JSON：非 `/health` 的 GET 按 Streamable HTTP 规范回 **405 + Allow: POST**。
+- 接受的通知（`notifications/initialized` 等）返回 **202**，不再用 204。
+
+### P2 · 参数被吞
+
+- `memory_forget` 的 `limit` 真正透传给 `MemoryDB.forget`。原来 `dry_run=false` 时它被丢掉，
+  一次维护调用会把全库符合条件的条目全归档。
+- `memory_dream` 的 `max_atoms` 真正透传，不再固定用 100000 的默认上限。
+
+### P2 · 门控
+
+- `_is_question` 判定顺序：**以强疑问词收尾**（什么/怎么/多少/是不是…）现在优先于断言词。
+  原来「我们统一用什么数据库」含「统一」，被判成陈述、再由「统一用」计分当 decision 收下 ——
+  一句问句就这样进了长期记忆。「为什么」仍放在断言词之后，保住「不要问我为什么」是祈使。
+
+### P2 · 代理
+
+- 注入预算改为 **recall 结果与 facts 共用一份**，长偏好不再把请求撑爆。
+- 纯图片消息（content 无文本）不再整体跳过注入：仍注入长期偏好与约束，只跳过语义检索。
+
+### P2 · 脚本
+
+- `scripts/run-memory-proxy.sh`：第一个位置参数（上游 URL）现在会 `shift` 掉。
+  原来它同时被当作 `--upstream` 的值和多余位置参数传给 argparse，代理直接起不来。
+
+### 测试
+
+- `test_gate_assertive.py` 增加「我们统一用什么数据库」用例
+- `test_mcp_server.py` 增加 HTTP 段：Origin 403 / GET 405 / /health 200 / 通知 202
+- `test_memory_proxy.py` 增加纯图片轮次注入与小预算截断两段
 ## v1.2.0 —— 2026-10-29
 
 两种接入宿主的方式，任选或并用。

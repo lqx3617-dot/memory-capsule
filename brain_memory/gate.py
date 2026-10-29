@@ -171,8 +171,11 @@ _Q_PATTERNS = ("哪个", "哪些", "哪种", "是不是", "要不要", "行不�
 # 以疑问词开头的句子，即使后半句带「不用/别」也仍然是问句
 _WH_FIRST = ("为什么", "怎么", "哪", "什么", "多少", "是否")
 _TAIL_QUESTION = ("吗", "呢", "么")
-_END_QUESTION = ("什么", "怎么", "哪儿", "哪里", "几点", "多少",
-                 "为什么", "是不是", "有没有", "能不能")
+# 强疑问收尾：这些词收尾基本只能是问句
+_STRONG_END = ("什么", "怎么", "哪儿", "哪里", "几点", "多少",
+               "是不是", "有没有", "能不能")
+# 弱疑问收尾：「不要问我为什么」是祈使，所以「为什么」要排在断言词之后
+_WEAK_END = ("为什么",)
 
 
 def _is_question(text: str) -> bool:
@@ -186,11 +189,16 @@ def _is_question(text: str) -> bool:
         return True
     if t.startswith(_WH_FIRST):
         return True
-    if any(w in t for w in _ASSERTIVE):
-        return False
     if t[-3:].endswith(_TAIL_QUESTION):
         return True
-    return any(t.endswith(w) for w in _END_QUESTION)
+    # 以强疑问词收尾的，优先于断言词 —— 否则「我们统一用什么数据库」
+    # 会因为含「统一」被判成陈述，再由「统一用」计分当决策收下。
+    if any(t.endswith(w) for w in _STRONG_END):
+        return True
+    if any(w in t for w in _ASSERTIVE):
+        return False
+    # 「为什么」放最后：「不要问我为什么」是祈使，不是问句。
+    return any(t.endswith(w) for w in _WEAK_END)
 
 
 def _hard_reject(text: str, cfg: MemoryConfig) -> str | None:

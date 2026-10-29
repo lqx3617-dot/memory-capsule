@@ -7,9 +7,13 @@
 """
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVER = os.path.join(HERE, "mcp_server.py")
@@ -21,6 +25,43 @@ def check(cond, msg):
     print(("  [OK]   " if cond else "  [FAIL] ") + msg)
     if not cond:
         FAILS.append(msg)
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def wait_http(port, proc, path="/health"):
+    for _ in range(60):
+        if proc.poll() is not None:
+            raise RuntimeError("HTTP 服务提前退出，code=%r" % proc.returncode)
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:%d%s" % (port, path), timeout=1) as r:
+                if r.status in (200, 405):
+                    return True
+        except urllib.error.HTTPError as exc:
+            if exc.code in (200, 405):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.2)
+    return False
+
+
+def post_json(port, payload, origin=None, path="/mcp"):
+    headers = {"Content-Type": "application/json"}
+    if origin:
+        headers["Origin"] = origin
+    req = urllib.request.Request(
+        "http://127.0.0.1:%d%s" % (port, path),
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return resp.status, resp.read()
 
 
 class Client:
@@ -133,6 +174,41 @@ def main() -> int:
         print("11. 空参数")
         err, text = client.tool("memory_ingest", content="")
         check(err, "空 content 被拒: " + text)
+
+        print("12. HTTP 模式：Origin 校验 / GET 405 / 通知 202")
+        http_port = free_port()
+        proc2 = subprocess.Popen(
+            [sys.executable, SERVER, "--db", os.path.join(tmpdir, "h.db"),
+             "--http", str(http_port)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            check(wait_http(http_port, proc2), "HTTP 服务就绪")
+            init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18"}}
+            status, body = post_json(http_port, init)
+            check(status == 200, "无 Origin 放行（%d）" % status)
+            check(json.loads(body.decode("utf-8")).get("result", {})
+                  .get("serverInfo", {}).get("name") == "brain-memory", "initialize 正常回包")
+            try:
+                post_json(http_port, init, origin="http://evil.example")
+                check(False, "恶意 Origin 应被拒")
+            except urllib.error.HTTPError as exc:
+                check(exc.code == 403, "恶意 Origin 返回 403（实际 %d）" % exc.code)
+            try:
+                urllib.request.urlopen("http://127.0.0.1:%d/mcp" % http_port, timeout=5)
+                check(False, "GET /mcp 应 405")
+            except urllib.error.HTTPError as exc:
+                check(exc.code == 405, "GET /mcp 返回 405（实际 %d）" % exc.code)
+            with urllib.request.urlopen("http://127.0.0.1:%d/health" % http_port, timeout=5) as r:
+                check(r.status == 200, "GET /health 仍 200")
+            status, _ = post_json(http_port, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+            check(status == 202, "通知返回 202（实际 %d）" % status)
+        finally:
+            proc2.terminate()
+            try:
+                proc2.wait(timeout=10)
+            except Exception:
+                proc2.kill()
     finally:
         try:
             proc.stdin.close()

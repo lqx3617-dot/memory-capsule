@@ -11,7 +11,15 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 DB="${BRAIN_DB:-$HOME/.brain-memory/memory.db}"
 PORT="${PORT:-8790}"
-UPSTREAM="${UPSTREAM:-$1}"
+UPSTREAM="${UPSTREAM:-}"
+# 第一个位置参数是上游 URL 时必须先 shift，否则它会同时被当成 --upstream
+# 的值和多余的位置参数，argparse 直接报错、代理起不来。
+if [ -z "$UPSTREAM" ] && [ "$#" -gt 0 ]; then
+  case "$1" in
+    -*) : ;;
+    *) UPSTREAM="$1"; shift ;;
+  esac
+fi
 
 if [ -z "$UPSTREAM" ]; then
   echo "用法: sh scripts/run-memory-proxy.sh <上游 baseURL>" >&2
