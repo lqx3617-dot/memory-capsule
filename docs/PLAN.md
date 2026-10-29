@@ -1,7 +1,11 @@
 # PLAN.md — 记忆胶囊（brain_memory）长期记忆库
 
 **版本** v0.1（待确认）　**目标环境** Android PRoot / Termux / aarch64 / Python 3.10+ / 无 root / 无 systemd
-**规则来源** 仓库根 `README.md`（即提交信息所称 AGENT_RULES.md 的正文；`AGENT_RULES.md` 文件本身在仓库中不存在，404）
+**规则来源** 仓库根 `README.md` 与 [`docs/AGENT_RULES.md`](AGENT_RULES.md)
+
+> **本文是 v1.0 时期的实施计划，作为历史记录保留。** Phase 1 / Phase 2 都已落地，
+> 文中「Phase 1 桩」「Phase 2 才启用」这类表述描述的是当时的计划状态，不是当前行为。
+> 当前行为以 [`README.md`](../README.md) 与 [`PUBLIC_API.md`](PUBLIC_API.md) 为准。
 
 ---
 
@@ -199,7 +203,7 @@ process
 
 | 操作 | 目标 | 手段 | 验证方式 |
 |---|---|---|---|
-| `ingest` 单条 | < 50ms | WAL + `synchronous=NORMAL` + 单事务 + 预编译语句 | `tests/test_perf.py` 打 p50/p95 |
+| `ingest` 单条 | < 50ms | WAL + `synchronous=NORMAL` + 单事务 + 预编译语句 | `tests/test_perf.py`（**计划中，尚未实现**）打 p50/p95 |
 | `recall` | < 100ms（atoms < 10k） | FTS5 MATCH + `LIMIT top_k*4` 预筛 + 内存打分 + 零写 | 同上 |
 | `forget(dry_run)` 全扫 10k | < 1.5s | 只查 `id, quality, access_count, last_accessed_at`（覆盖索引） | 同上 |
 | `close` | < 300ms | checkpoint(TRUNCATE) 后立即关 | 验收脚本打印总耗时 |
@@ -244,7 +248,7 @@ brain_memory/
   promote.py       # 五项检查（价值/证据/实体链接/去重/冲突）
   recall.py        # 查询解析 + FTS5 构造 + 打分 + 预算截断
   forget.py        # 判定 + 状态迁移
-  dream.py         # Phase 1 桩
+  dream.py         # 巩固：L3 实体页 + DREAMS.md
   vec.py           # sqlite-vec 探测 / numpy 兜底
   cli.py           # python -m brain_memory ...
 tests/             # 临时目录真库，不 mock 存储层
@@ -282,7 +286,7 @@ PLAN.md  PUBLIC_API.md
 | 5 两线程各 100 次 ingest+recall 不报错不死锁 | 读写锁 + 超时 | `test_concurrency.py` |
 | 6 不装 vec 仍能 recall | `vec.py` 探测降级 | `test_vec_fallback.py` |
 | 7 demo 可运行 | `examples/embed_demo.py` | 手动跑 |
-| 8 PRoot 实测耗时打印 | `demo` 与 `test_perf.py` | 实测报告 |
+| 8 PRoot 实测耗时打印 | `demo` 与 `test_perf.py`（**计划中**） | 实测报告 |
 
 ---
 

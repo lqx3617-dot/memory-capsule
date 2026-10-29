@@ -1,6 +1,6 @@
 # PUBLIC_API.md — 记忆胶囊（brain_memory）公开 API 契约
 
-**版本** v0.1（待确认）　**稳定性承诺** Phase 1 冻结下列签名；任何破坏性变更走主版本号。
+**版本** 1.2.1　**稳定性承诺** 下列签名已冻结；任何破坏性变更走主版本号。
 
 ---
 
@@ -64,7 +64,7 @@ MemoryDB(path: str | os.PathLike, config: dict | MemoryConfig | None = None) -> 
 
 ---
 
-## 3. 五个核心 API
+## 3. 核心 API
 
 ### 3.1 `ingest`
 
@@ -108,14 +108,15 @@ mem.recall(query: str, top_k: int = 5, budget_tokens: int = 2000, *,
 | min_quality | 缺省＝配置 `recall_min_quality(0.0)`，只过滤不报错 |
 | fact_types | 白名单过滤 |
 | session_id | 限定来源会话（走 `raw_events` join） |
-| layer | Phase 1 只接受 `"L2"`；传 `"L1"/"L0"` 且 `enable_escalation=False` → 记 warning 并按 L2 处理，**不抛** |
+| layer | 缺省 `"L2"`；传 `"L1"/"L0"` 且 `enable_escalation=False` 时按 L2 处理并记 debug 日志，**不抛** |
 | 返回 | 按 `score` 降序的 `list[Memory]`，已剔除 `state != 'active'` 的原子 |
-| 打分 | `score = 0.55*norm_bm25 + 0.35*quality + 0.10*recency`（权重可配） |
+| 打分 | 三种情况三套算法：FTS+向量 → RRF 归一化；仅向量 → `0.8*sim + 0.2*quality`；仅 FTS → `0.55*norm_bm25 + 0.35*quality + 0.10*recency` |
+| quality 口径 | **现场用 `compute_quality()` 重算**（feedback × decay × connectivity），不读 `atoms.quality` 存储值 —— 那只是写入时的快照，不会自己衰减 |
 | 副作用 | **零数据库写**；只往内存 `_access_delta` 累加（flusher 异步刷盘） |
 | 抛异常 | `ValueError`、`ClosedError`、`LockTimeoutError`、`DatabaseError` |
 | 降级 | vec 不可用 → 纯 FTS5，结果照常返回；FTS 表空 → 返回 `[]` |
 | 性能 | < 100ms（atoms < 10k） |
-| escalation 骨架 | `max(score) < escalate_threshold(0.35)` 且配置开启时，Phase 2 会扩展到 L1/L0；Phase 1 只记 warning 日志 |
+| escalation | `max(score) < escalate_threshold(0.35)` 或 L2 空时，若 `enable_escalation=True` 则向下探 L1 → L0（L0 只看最近 `escalate_l0_limit` 条，绝不全表扫）；L0/L1 命中不计访问计数 |
 
 ### 3.3 `forget`
 
@@ -148,9 +149,8 @@ mem.dream(*, persist: bool = True, max_atoms: int | None = None) -> str
 | 项 | 内容 |
 |---|---|
 | 语义 | 执行一次巩固（L2→L3 摘要、episodic 语义化、写 `DREAMS.md`） |
-| Phase 1 | **桩实现**：不写 L3，写 journal(`dream`)，返回固定说明文本（含 atoms 数量与「L3 巩固在 Phase 2 启用」），**不抛异常** |
-| Phase 2 | 返回生成的摘要 Markdown 全文；`persist=True` 时同时落 `entity_pages` 与 `DREAMS.md` |
-| 抛异常 | `ClosedError`、`LockTimeoutError`、`DatabaseError`（Phase 2 才可能） |
+| 行为 | 返回生成的摘要 Markdown 全文；`persist=True` 时同时落 `entity_pages` 与 `DREAMS.md` |
+| 抛异常 | `ClosedError`、`LockTimeoutError`、`DatabaseError` |
 | 约束 | 不在 `recall` 热路径被调用；不做任何权重改动 |
 
 ### 3.5 `close`
@@ -167,6 +167,39 @@ mem.close(timeout: float = 5.0) -> None
 | 兜底 | 未显式 close 时由 `__del__`/`atexit` 尽力 flush，但不保证 checkpoint |
 
 ---
+
+### 3.6 `remember`
+
+```text
+mem.remember(session_id: str, content: str, *,
+             fact_type: str = "fact",
+             confidence: float = 0.8,
+             meta: dict | None = None) -> int
+```
+
+| 项 | 内容 |
+|---|---|
+| 与 `ingest` 的区别 | **跳过门控**：调用方已确认这是事实（比如模型压缩出的摘要条目），不该被「太短 / 像闲聊 / 像问句」挡掉 |
+| fact_type | 非 `FACT_TYPES` 里的值归一为 `fact` |
+| 副作用 | L0 照常落盘 → L1 → L2，溯源链不断；晋升仍走去重 / 冲突检查 |
+| 抛异常 | 同 `ingest`（`ValueError` / `ClosedError` / `LockTimeoutError` / `DatabaseError`） |
+
+### 3.7 `facts`
+
+```text
+mem.facts(*, session_id: str | None = None,
+          fact_types: list[str] | tuple[str, ...] | None = None,
+          min_quality: float = 0.0,
+          limit: int = 50) -> list[Memory]
+```
+
+| 项 | 内容 |
+|---|---|
+| 语义 | **按类型直接列举**，不做任何语义检索 |
+| 用途 | 把「这个用户的所有偏好与约束」整批注入 system prompt。这类需求不能靠关键词检索 —— 用户问「今天心情不好」时，「别给我发语音」不会因为字面相似被召回 |
+| 过滤 | `min_quality` 同样按**现场重算**的 quality 判定 |
+| 排序 | 先按 quality 降序，同质量按 `id` **升序**（早期建立的通常是身份信息，越往后越是口水话） |
+| 返回 | `Memory` 列表，`score` 字段填的就是重算后的 quality |
 
 ## 4. 运维方法
 
@@ -264,5 +297,5 @@ python -m brain_memory --db PATH maintain --level full
 | b | 是否采纳 `feedback()` 作为公开方法 |
 | c | `hard` 语义：只删 atoms 行 vs 完全不删只标 `unlinked` |
 | d | `atoms.state` 两列是否加（不加则 forget 无处落状态） |
-| e | Phase 1 不建 vec0 表 |
+| e | vec0 表在 sqlite-vec 可用时建；不可用时降级为 numpy / pure / none，向量本身仍存 `atoms.embedding` |
 | f | 中文 FTS 分词：接受双路回退，或强制要求 SQLite ≥ 3.34 |
