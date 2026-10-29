@@ -440,5 +440,5 @@ def nightly():
 
 ## 十五、阶段说明
 
-- `enable_escalation` 目前只留判定钩子，Phase 3 才会真的 L2→L1→L0 下探。
+- `enable_escalation` 默认关；开启后会真正下探 L2→L1→L0（`tests/test_escalation.py` 有断言，L0 只看最近 `escalate_l0_limit` 条）。
 - 其余接口已全部落地，业务代码不需要为后续升级做适配 —— 签名不变。

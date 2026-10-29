@@ -57,7 +57,7 @@
 
 > **注**：上面「出站网络」一列说的是**默认配置**。要真的产生出站，光把开关打开不够 ——
 >
-> - **门控调 LLM**：要 `enable_llm_gate=True` **且** 配了 `llm_endpoint` + `llm_model`，
+> - **门控调 LLM**：要 `enable_llm_gate=True` **且** 有可用的 endpoint + model —— 优先取 `extract_llm_endpoint` + `extract_llm_model`（主从分离，省额度），没配就回落到 `llm_endpoint` + `llm_model`；
 >   而且只在置信度落在边界区间（0.42 ≤ conf < 0.78）时才真的发请求，高置信度和低置信度都走纯规则。
 > - **远程 embedding**：要 `embedding_backend="http"` **且** 配了 `embedding_endpoint` + `embedding_model`，
 >   缺任何一个 `resolve_embedder()` 都返回 None —— 结果是**完全不做向量**（`vector_backend=none`），退回纯 FTS5，而不是换成本地哈希。都不出网。
@@ -320,7 +320,7 @@ quality = clamp01( feedback × decay × connectivity )
 
 ## 配置
 
-`MemoryConfig` 共 **69 项**，优先级：显式 config > 环境变量 `BRAIN_MEMORY_*` > 默认值。
+`MemoryConfig` 共 **74 项**，优先级：显式 config > 环境变量 `BRAIN_MEMORY_*` > 默认值。
 
 ```python
 db = bm.MemoryDB(path, {
@@ -343,6 +343,7 @@ db = bm.MemoryDB(path, {
 | 向量 | `enable_vector` / `vec_min_similarity` / `pure_fallback_max_atoms` | True / 0.10 / 5000 |
 | 遗忘 | `halflife_*_d` / `silent_quality` / `archive_quality` | 7/90/365 天 / 0.15 / 0.25 |
 | 巩固 | `dream_min_quality` / `dream_cluster_similarity` / `dream_max_clusters` | 0.6 / 0.55 / 20 |
+| 主从模型 | `extract_llm_enabled` / `extract_llm_endpoint` / `extract_llm_model` | True / 空 / 空（留空则回落到 `llm_*`） |
 
 **v1.1.0 起移除了 4 个零引用配置**（`commit_batch` / `raise_on_llm_error` /
 `max_candidates_per_ingest` / `numpy_fallback_max_atoms`）：传进来会明确抛 `ConfigError`，不再静默无效。
@@ -421,7 +422,7 @@ brain_memory/
 ├── dream.py       巩固：L3 实体页 + DREAMS.md
 ├── vec.py         Embedder 接口 / 三级后端 / 距离换算
 ├── locks.py       写优先读写锁 + 全局锁
-├── config.py      MemoryConfig（69 项）
+├── config.py      MemoryConfig（74 项）
 ├── types.py       Memory / Stats / ForgetDecision + 枚举
 ├── cli.py         python -m brain_memory
 ├── errors.py      异常层级（9 类）

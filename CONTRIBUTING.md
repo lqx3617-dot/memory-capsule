@@ -15,7 +15,7 @@
 
 ```bash
 sh check.sh          # 基础四步：静态扫描 / 文档代码块 / 编译 / 建库体检
-sh check.sh --full   # 加上 5 个测试脚本
+sh check.sh --full   # 加上 14 个测试脚本
 ```
 
 CI 会在 Python 3.10–3.13 上跑全量，PR 必须全绿。
