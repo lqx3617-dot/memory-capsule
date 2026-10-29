@@ -27,6 +27,26 @@ CI 会在 Python 3.10–3.13 上跑全量，PR 必须全绿。
 3. **写清楚降级行为** —— 你的改动在「没有 numpy」「没有 sqlite-vec」「LLM 挂了」三种情况下分别怎样
 4. **别动注释里的实测记录** —— 那些形如 `⚠ 2026-10-22 实测：…` 的注释是踩坑档案，删了就没人知道为什么这么写
 
+## 合并纪律（2026-10-29 补，因为踩过）
+
+这个仓库装了 chatgpt-codex-connector[bot]。**一开 PR 它就自动审**，不用 @。
+
+v1.2.0 之前有三轮 PR 在没读它意见的情况下被合并，其中一条是 **P1**：
+MCP 的 HTTP 端点不校验 Origin，任何网页都能借 DNS rebinding 打到 127.0.0.1，
+读写用户的记忆。那 12 条意见里**没有一条是风格建议** —— 全是「某个输入会让某个功能静默出错」。
+
+现在由 review-gate 强制：
+
+| 规则 | 落地方式 |
+|---|---|
+| 每条 bot 行内意见必须点 Resolve conversation | .github/workflows/review-gate.yml 查 GraphQL reviewThreads，未解决就红 |
+| 确实不该改的 | 在 thread 里写理由，再 resolve —— 别硬改，也别硬合 |
+| 紧急放行 | 打 review-gate:skip 标签，会在 step summary 留痕 |
+| 本地先看 | GITHUB_TOKEN=... python3 scripts/check_review_findings.py 5 |
+
+顺序固定：**读意见 → 逐条处置 → Resolve → 再看 CI 绿不绿**。
+跳步的代价是 v1.2.0 带着 P1 出门、v1.2.1 才补回来。
+
 ## 代码风格
 
 - 全中文注释，说明「为什么」而不是「做了什么」

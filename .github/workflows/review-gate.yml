@@ -1,0 +1,80 @@
+name: review-gate
+
+# 合并前必须清空 bot 的审查意见。
+# 起因：v1.2.0 之前有三轮 PR 在没读 Codex 意见的情况下被合并，
+# 其中 mcp_server 的 HTTP 端点缺 Origin 校验（P1，DNS rebinding 可读写记忆）。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  bot-findings:
+    name: 未处理的审查意见
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 bot 行内意见是否都已 resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+
+            const labels = (pr.labels || []).map((l) => l.name);
+            if (labels.includes('review-gate:skip')) {
+              core.notice('已打 review-gate:skip 标签，跳过检查（会在 summary 留痕）');
+              await core.summary.addHeading('review-gate 已跳过').addRaw('PR 打了 review-gate:skip 标签。').write();
+              return;
+            }
+
+            const query = [
+              'query($owner: String!, $repo: String!, $number: Int!) {',
+              '  repository(owner: $owner, name: $repo) {',
+              '    pullRequest(number: $number) {',
+              '      reviewThreads(first: 100) {',
+              '        nodes {',
+              '          isResolved',
+              '          isOutdated',
+              '          comments(first: 1) {',
+              '            nodes { author { login } path line body }',
+              '          }',
+              '        }',
+              '      }',
+              '    }',
+              '  }',
+              '}',
+            ].join('\n');
+
+            const res = await github.graphql(query, { owner, repo, number: pr.number });
+            const threads = res.repository.pullRequest.reviewThreads.nodes || [];
+
+            const pending = threads.filter((t) => {
+              if (t.isResolved) return false;
+              const first = (t.comments.nodes || [])[0];
+              if (!first || !first.author) return false;
+              return first.author.login.endsWith('[bot]');
+            });
+
+            if (!pending.length) {
+              core.notice('没有未处理的 bot 审查意见');
+              return;
+            }
+
+            const items = pending.map((t) => {
+              const c = t.comments.nodes[0];
+              const head = (c.body || '').split('\n')[0].replace(/[*_]/g, '').slice(0, 110);
+              const where = (c.path || '(文件级)') + ':' + (c.line == null ? '?' : c.line);
+              return where + ' — ' + head;
+            });
+
+            await core.summary
+              .addHeading('还有 ' + pending.length + ' 条 bot 审查意见没有解决')
+              .addList(items)
+              .addRaw('逐条处理后在 GitHub 上点 Resolve conversation；确实不该改的，在 thread 里写理由再 resolve。')
+              .write();
+
+            core.setFailed('还有 ' + pending.length + ' 条 bot 审查意见未 resolve，不能合并。');
