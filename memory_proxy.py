@@ -90,28 +90,55 @@ class MemoryBridge:
             self._db = None
 
     def build_block(self, query: str) -> str:
-        """把「相关记忆 + 常驻偏好」拼成一段可注入的文本。失败返回空串。"""
-        if not query:
-            return ""
+        """把「相关记忆 + 常驻偏好」拼成一段可注入的文本。失败返回空串。
+
+        query 为空（纯图片消息）时跳过检索，但仍然注入长期偏好 —— 那些与查询无关，
+        多模态轮次同样需要它们在场。
+        """
         parts: list[str] = []
-        try:
-            hits = self.db.recall(query, self.top_k, self.budget_tokens)
-            if hits:
-                parts.append("【相关记忆】")
-                for m in hits:
-                    parts.append("- " + m.content)
-        except Exception as exc:
-            _log("检索失败（已忽略）: %s" % exc)
+        budget_tokens = max(1, int(self.budget_tokens))
+        # 与 recall 的 chars_per_token 对齐：预算按 token 计，这里按字符近似
+        limit_chars = max(1, int(budget_tokens * 1.7))
+        # 固定提示语也占预算 —— 否则小预算下光提示语就把额度吃穿了
+        header_cost = len(_MEMORY_HEADER) + 2
+        if header_cost >= limit_chars:
+            _log("注入预算 %d token 连提示语都放不下，本轮不注入" % budget_tokens)
+            return ""
+        used = header_cost
+
+        def take(text: str) -> bool:
+            nonlocal used
+            remain = limit_chars - used
+            if remain <= 0:
+                return False
+            if len(text) > remain:
+                text = text[:remain] + "…"
+            parts.append(text)
+            used += len(text)
+            return True
+
+        if query:
+            try:
+                hits = self.db.recall(query, self.top_k, budget_tokens)
+                if hits and take("【相关记忆】"):
+                    for m in hits:
+                        if not take("- " + m.content):
+                            break
+            except Exception as exc:
+                _log("检索失败（已忽略）: %s" % exc)
+
         if self.inject_facts:
             try:
                 rows = self.db.facts(
                     fact_types=["preference", "constraint"], limit=self.fact_limit)
-                if rows:
-                    parts.append("【长期偏好与约束】")
+                if rows and take("【长期偏好与约束】"):
                     for m in rows:
-                        parts.append("- " + m.content)
+                        # 偏好与记忆共用同一份预算，否则长偏好会把请求撑爆
+                        if not take("- " + m.content):
+                            break
             except Exception as exc:
                 _log("facts 失败（已忽略）: %s" % exc)
+
         if not parts:
             return ""
         return _MEMORY_HEADER + "\n\n" + "\n".join(parts)

@@ -23,6 +23,7 @@ import os
 import sys
 import traceback
 from typing import Any
+from urllib.parse import urlsplit
 
 SERVER_NAME = "brain-memory"
 SERVER_VERSION = "1.1.0"
@@ -133,8 +134,12 @@ class MemoryService:
     def forget(self, args: dict[str, Any]) -> str:
         dry_run = bool(args.get("dry_run", True))
         older = args.get("older_than_days")
+        limit = args.get("limit")
         decisions = self.db.forget(
             dry_run=dry_run,
+            # limit 必须透传：dry_run=false 时忽略了它，一次维护调用就会
+            # 把全库符合条件的条目全归档，远超调用方申请的条数。
+            limit=int(limit) if limit is not None else None,
             older_than_days=float(older) if older is not None else None,
         )
         if not decisions:
@@ -149,7 +154,11 @@ class MemoryService:
 
     def dream(self, args: dict[str, Any]) -> str:
         persist = bool(args.get("persist", True))
-        text = self.db.dream(persist=persist)
+        max_atoms = args.get("max_atoms")
+        text = self.db.dream(
+            persist=persist,
+            max_atoms=int(max_atoms) if max_atoms is not None else None,
+        )
         return text[:4000]
 
     def stats(self, args: dict[str, Any]) -> str:
@@ -336,9 +345,11 @@ def serve_http(svc: MemoryService, host: str, port: int) -> int:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def _write(self, payload: dict[str, Any] | None) -> None:
+        def _write(self, payload: dict[str, Any] | None, status: int | None = None) -> None:
             body = b"" if payload is None else _dumps(payload).encode("utf-8")
-            self.send_response(204 if payload is None else 200)
+            if status is None:
+                status = 204 if payload is None else 200
+            self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Mcp-Session-Id", "brain-memory")
@@ -346,7 +357,24 @@ def serve_http(svc: MemoryService, host: str, port: int) -> int:
             if body:
                 self.wfile.write(body)
 
+        def _origin_allowed(self) -> bool:
+            """Streamable HTTP 规范要求校验 Origin，否则网页可借 DNS rebinding
+            打到 127.0.0.1，读改用户的记忆。没有 Origin 的是非浏览器客户端，放行。"""
+            origin = self.headers.get("Origin")
+            if not origin:
+                return True
+            try:
+                host = (urlsplit(origin).hostname or "").lower()
+            except Exception:
+                return False
+            if not host:
+                return False
+            return host in ("127.0.0.1", "localhost", "::1") or host.endswith(".localhost")
+
         def do_POST(self) -> None:  # noqa: N802
+            if not self._origin_allowed():
+                self._write({"error": "origin 不被信任"}, status=403)
+                return
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
@@ -355,11 +383,20 @@ def serve_http(svc: MemoryService, host: str, port: int) -> int:
                 return
             if isinstance(payload, list):          # 批量
                 out = [r for r in (handle(svc, one) for one in payload) if r is not None]
-                self._write(out or None)
+                self._write(out or None, status=200 if out else 202)
                 return
-            self._write(handle(svc, payload))
+            resp = handle(svc, payload)
+            # 规范：接受的通知返回 202，不是 204 —— 有的客户端会校验这个码
+            self._write(resp, status=200 if resp is not None else 202)
 
         def do_GET(self) -> None:  # noqa: N802
+            # 不提供 SSE 流，就按规范回 405；/health 是给人看的旁路，不算 MCP 端点
+            if self.path.rstrip("/") not in ("/health", ""):
+                self.send_response(405)
+                self.send_header("Allow", "POST")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             self._write({"status": "ok", "server": SERVER_NAME, "version": SERVER_VERSION})
 
         def log_message(self, *args: Any) -> None:   # 别往 stderr 刷访问日志

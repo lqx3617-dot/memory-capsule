@@ -168,11 +168,22 @@ _ASSERTIVE = ("必须", "不能", "不要", "别", "不用", "禁止", "只能",
 # 明确疑问构式：几乎不用于陈述，优先于 _ASSERTIVE 判定
 _Q_PATTERNS = ("哪个", "哪些", "哪种", "是不是", "要不要", "行不行",
                "好不好", "可不可以", "有没有")
+# 句中疑问短语：「我们统一用什么数据库」的疑问词在中间，靠 endswith 抓不到。
+# 这些组合几乎只出现在问句里，且不会误伤「统一用 X」这种陈述。
+_Q_PHRASES = ("用什么", "用哪", "是多少", "是什么", "有什么", "怎么办",
+              "怎么样", "如何", "选哪", "改成什么")
 # 以疑问词开头的句子，即使后半句带「不用/别」也仍然是问句
 _WH_FIRST = ("为什么", "怎么", "哪", "什么", "多少", "是否")
 _TAIL_QUESTION = ("吗", "呢", "么")
-_END_QUESTION = ("什么", "怎么", "哪儿", "哪里", "几点", "多少",
-                 "为什么", "是不是", "有没有", "能不能")
+# 强疑问收尾：这些词收尾基本只能是问句
+_STRONG_END = ("什么", "怎么", "哪儿", "哪里", "几点", "多少",
+               "是不是", "有没有", "能不能")
+# 弱疑问收尾：「不要问我为什么」是祈使，所以「为什么」要排在断言词之后
+_WEAK_END = ("为什么",)
+# 句中疑问词兜底（已无断言词时才用）
+_WH_ANYWHERE = ("什么", "怎么", "哪", "多少", "是否", "如何")
+# 这些搭配里的疑问词是虚指
+_NOT_QUESTION_HINTS = ("没什么", "不管", "无论", "无所谓", "随便", "别问", "不要问")
 
 
 def _is_question(text: str) -> bool:
@@ -184,13 +195,31 @@ def _is_question(text: str) -> bool:
         return True
     if any(p in t for p in _Q_PATTERNS):
         return True
+    if any(p in t for p in _Q_PHRASES):
+        return True
     if t.startswith(_WH_FIRST):
+        return True
+    # 单字「么」杀伤面太大：「为什么 / 什么 / 怎么 / 那么」收尾都是「么」。
+    # 只认真正的语气词，其余交给下面的强/弱疑问表。
+    if t.endswith(("吗", "呢")):
+        return True
+    if t.endswith("么") and not t.endswith(
+            ("什么", "怎么", "那么", "这么", "多么", "要么", "为什么")):
+        return True
+    # 以强疑问词收尾的，优先于断言词 —— 否则「我们统一用什么数据库」
+    # 会因为含「统一」被判成陈述，再由「统一用」计分当决策收下。
+    if not t.endswith("为什么") and any(t.endswith(w) for w in _STRONG_END):
         return True
     if any(w in t for w in _ASSERTIVE):
         return False
-    if t[-3:].endswith(_TAIL_QUESTION):
+    # 这些搭配里的疑问词是虚指，不是提问
+    if any(h in t for h in _NOT_QUESTION_HINTS):
+        return False
+    # 疑问词在句中（「这个项目怎么部署」），已经不剩断言词了
+    if any(w in t for w in _WH_ANYWHERE):
         return True
-    return any(t.endswith(w) for w in _END_QUESTION)
+    # 「为什么」放最后：「不要问我为什么」是祈使，不是问句。
+    return any(t.endswith(w) for w in _WEAK_END)
 
 
 def _hard_reject(text: str, cfg: MemoryConfig) -> str | None:
