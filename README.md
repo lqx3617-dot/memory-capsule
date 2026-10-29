@@ -60,7 +60,7 @@
 > - **门控调 LLM**：要 `enable_llm_gate=True` **且** 配了 `llm_endpoint` + `llm_model`，
 >   而且只在置信度落在边界区间（0.42 ≤ conf < 0.78）时才真的发请求，高置信度和低置信度都走纯规则。
 > - **远程 embedding**：要 `embedding_backend="http"` **且** 配了 `embedding_endpoint` + `embedding_model`，
->   缺任何一个都会退回本地哈希向量，不出网。
+>   缺任何一个 `resolve_embedder()` 都返回 None —— 结果是**完全不做向量**（`vector_backend=none`），退回纯 FTS5，而不是换成本地哈希。都不出网。
 >
 > 这两条链默认都是关的：`enable_llm_gate=False`、`embedding_backend="hash"`。
 
