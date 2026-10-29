@@ -1,0 +1,15 @@
+# 记忆胶囊 · DSH MCP 客户端配置（示例，请改路径）
+# 用法: dsh web --patch "$PWD/examples/dsh-memory-mcp.cordis.yml"
+- insert:
+    - id: memory-brain-capsule
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: brain-memory
+        transport: stdio
+        command: python3
+        args:
+          - /data/data/com.termux/files/home/memory-capsule/mcp_server.py
+          - --db
+          - /data/data/com.termux/files/home/.brain-memory/memory.db
+        env: {}
+        cwd: !!js process.cwd()

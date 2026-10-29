@@ -281,6 +281,7 @@ sh check.sh --full   # 再加 tests/test_smoke.py / tests/test_t4.py / tests/tes
 | [`PLAN.md`](docs/PLAN.md) | 实施计划、schema、并发模型、验收映射 |
 | [`PUBLIC_API.md`](docs/PUBLIC_API.md) | API 契约、异常、降级总表、不变量 |
 | [`EMBEDDING.md`](docs/EMBEDDING.md) | App 集成最佳实践 |
+| [`MCP.md`](docs/MCP.md) | 接成 MCP 插件：DSH / Operit AI / Claude Desktop |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南与设计红线 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本记录 |
 
