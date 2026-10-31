@@ -139,6 +139,14 @@ class MemoryConfig:
     dreams_path: str | None = None       # 缺省写到 DB 同目录 DREAMS.md
 
     # ---- 遗忘 ----
+    # 时间压缩（dt_eff）：真实年龄 → 等效天数，再代入衰减。
+    # 目的：7 天内的近期记忆按真实衰减（该淡就淡），
+    #      越过 7 天后把时间「踩住」，让人感觉还记得；越老踩得越狠。
+    age_compress_knee1_d: float = 7.0      # 第一拐点：这之前不压缩
+    age_compress_knee2_d: float = 30.0     # 第二拐点：这之后用更狠的系数
+    age_compress_factor_mid: float = 0.5   # 7~30 天：超出部分按 50% 计
+    age_compress_factor_far: float = 0.15  # 30 天以上：超出部分按 15% 计
+    age_compress_cap_d: float = 90.0       # dt_eff 上限，防止极老记忆衰减到 0
     halflife_episodic_d: float = 7.0
     halflife_semantic_d: float = 90.0
     halflife_procedural_d: float = 365.0
@@ -265,6 +273,14 @@ class MemoryConfig:
         self._require(self.vec_candidate_multiplier >= 1, "vec_candidate_multiplier 至少 1")
         self._require(self.embedding_timeout_s > 0, "embedding_timeout_s 需大于 0")
 
+        self._require(self.age_compress_knee1_d >= 0, "age_compress_knee1_d 不能为负")
+        self._require(self.age_compress_knee2_d > self.age_compress_knee1_d,
+                      "age_compress_knee2_d 必须大于 knee1")
+        self._require(0.0 <= self.age_compress_factor_mid <= 1.0,
+                      "age_compress_factor_mid 需在 0..1")
+        self._require(0.0 <= self.age_compress_factor_far <= 1.0,
+                      "age_compress_factor_far 需在 0..1")
+        self._require(self.age_compress_cap_d > 0, "age_compress_cap_d 需大于 0")
         for name in ("halflife_episodic_d", "halflife_semantic_d", "halflife_procedural_d"):
             self._require(getattr(self, name) > 0, f"{name} 需大于 0")
         for name in ("feedback_used", "feedback_useful", "feedback_noise"):

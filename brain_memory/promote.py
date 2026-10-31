@@ -275,6 +275,23 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
 
     conflict_id, _conflict_sim = check_conflict(conn, content, fact_type, cfg)
 
+    # 核心事实保护：旧的那条 if is_core=1，新事实一律不许覆盖它。
+    # 判断必须在插入新原子之前 —— 否则旧的下线、新的进来，就变成「被覆盖」了。
+    if conflict_id is not None:
+        row = conn.execute(
+            "SELECT is_core FROM atoms WHERE id = ?", (conflict_id,)
+        ).fetchone()
+        if row is not None and int(row[0] or 0) == 1:
+            conn.execute(
+                "INSERT INTO journal(action, target_table, target_id, detail_json, created_at) "
+                "VALUES ('core_protect', 'atoms', ?, ?, ?)",
+                (conflict_id,
+                 json.dumps({"rejected_content": content[:200], "fact_type": fact_type},
+                            ensure_ascii=False),
+                 utc_now()),
+            )
+            return "rejected", None
+
     trimmed = content[: cfg.max_atom_chars]
     cur = conn.execute(
         "INSERT INTO atoms(entity_id, fact_type, content, confidence, quality, "

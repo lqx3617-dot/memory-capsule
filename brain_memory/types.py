@@ -27,6 +27,7 @@ JOURNAL_ACTIONS = (
     "promote",
     "merge",
     "conflict",
+    "core_protect",    # 核心事实挡住了覆盖请求
     "silent",          # 与 ATOM_STATES / FORGET_ACTIONS 对齐；原来写成 silence，从未产生
     "archive",
     "revive",
@@ -98,6 +99,7 @@ class Memory:
     layer: str = "L2"
     truncated: bool = False
     record_id: int | None = None   # 当前层的主键：L2=atom_id，L1=candidate.id，L0=raw_event.id
+    is_core: bool = False          # 核心事实：冲突时受保护，新事实不许覆盖它
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -115,6 +117,7 @@ class Memory:
             "layer": self.layer,
             "truncated": self.truncated,
             "record_id": self.record_id,
+            "is_core": self.is_core,
         }
 
 

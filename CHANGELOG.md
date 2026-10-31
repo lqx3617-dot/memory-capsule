@@ -1,5 +1,71 @@
 # 更新记录
 
+## v1.4.0 —— 2026-10-31
+
+第一阶段升级：**不破坏现有结构，强化核心记忆**。四件事。
+
+### 1. 时间压缩 dt_eff
+
+衰减不再用真实年龄，先折算成等效天数：
+
+| 真实年龄 | dt_eff |
+|---|---|
+| < 7 天 | 原样（近期该淡就淡） |
+| 7~30 天 | `7 + (age-7) × 0.5` |
+| > 30 天 | `18.5 + (age-30) × 0.15` |
+| 任何情况 | 不超过 `age_compress_cap_d`（90） |
+
+效果：180 天前的事实，原来 quality 衰减到 0.25（`dream` 已经不巩固它了），
+压缩后等效 41 天、quality 0.73 —— **不会被当成「忘了」**。7 天内的行为完全不变。
+
+五个参数全部可配（`age_compress_*`）。
+
+### 2. 核心事实 `is_core`
+
+`atoms` 加 `is_core` 列（schema v2 → v3，自动迁移）。
+
+冲突检测时，如果**旧事实**是核心，新事实一律被拒：
+
+```python
+db.mark_core(atom_id)          # 标记
+db.mark_core(atom_id, False)   # 取消
+```
+
+被拒时写 journal 的 `core_protect`，带上被拒内容的摘要 —— 谁想改、被谁挡了，都留痕。
+适合身份、硬约束这类「不可能被改主意」的内容。
+
+### 3. 预算式召回 `recall_with_budget()`
+
+```python
+items = db.recall_with_budget(user_text, total_budget=2500, facts_budget=800)
+```
+
+先用 800 token 把 `facts()`（偏好 / 约束 / 核心事实）钉死，余量才给 FTS5 / 向量。
+
+为什么顺序不能反：「别给我发语音」按关键词根本检索不到，但它比任何一条语义命中都重要。
+返回列表 PIN 在前、检索在后，超预算时最后一条会截断而不是整条丢掉。
+
+### 4. `examples/soul_prompt_builder.py`
+
+称呼规则放 prompt 最顶部：
+
+```python
+prompt = build_system_prompt(user_name="李跃铭", persona="你是爸爸的助手", memory_items=items)
+```
+
+第一行就是「用户叫李跃铭，必须用这个名字称呼，严禁使用「您」」。
+`app_integration.py` 加了 `compose_system_prompt_v2()` 展示接法。
+
+> 注：需求里的 `app/ai_autoreply.py` 与 `soul_prompt_builder` 不在本仓库，
+> 这里给的是可复用的实现 + 接入示例，搬到你的 App 里改 import 即可。
+
+### 测试
+
+- `test_age_compress`：四个区间数值、封顶、180 天前后的对比
+- `test_core_fact`：标记、保护、取消后恢复、非核心行为不变
+- `test_recall_budget`：PIN 前缀、去重、极小预算、空 query
+
+`check.sh --full` 覆盖 **24 个测试脚本 + 2 个示例**。
 ## v1.3.8 —— 2026-10-29
 
 第十轮：追 `test_concurrency` 在 CI 上的偶发失败。
