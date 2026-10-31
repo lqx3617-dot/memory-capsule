@@ -73,6 +73,22 @@ def main() -> int:
     finally:
         db.close()
 
+    print("5. 同极性改写也被挡住（名字场景）")
+    db = bm.MemoryDB(":memory:")
+    try:
+        # 「名字是 A」→「名字是 B」极性相同、没有数字，check_conflict 不认这种，
+        # 靠 core_similarity 那条前移的保护挡住。
+        db.remember("s", "爸爸的名字是李跃铭", fact_type="fact", confidence=0.9)
+        atom = db.facts(fact_types=["fact"])[0]
+        db.mark_core(atom.atom_id)
+        db.remember("s", "爸爸的名字是王小明", fact_type="fact", confidence=0.95)
+        left = db.facts(fact_types=["fact"])
+        check(len(left) == 1 and "李跃铭" in left[0].content,
+              "名字没被改掉（剩 %d 条：%r）" % (len(left), left[0].content if left else ""))
+        check("core_protect" in journal_actions(db), "journal 记了 core_protect")
+    finally:
+        db.close()
+
     print("\n%s" % ("全部通过" if not FAILS else "失败 %d 项" % len(FAILS)))
     return 0 if not FAILS else 1
 

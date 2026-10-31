@@ -1105,8 +1105,12 @@ class MemoryDB:
         cpt = max(0.1, float(self._cfg.chars_per_token))
         return max(1, int(math.ceil(len(text) / cpt)))
 
+    # 默认只钉「必须遵守」的类型。fact_types=None 时如果钉全表，
+    # 普通 fact / task 会先把 800 的预算吃掉，把真正的规则挤出去。
+    PINNED_TYPES = ("preference", "constraint", "convention")
+
     def pin_facts(self, budget_tokens: int = 800, *,
-                  fact_types: list[str] | None = None,
+                  fact_types: list[str] | tuple[str, ...] | None = None,
                   min_quality: float = 0.0,
                   limit: int = 50) -> list[Memory]:
         """按 token 预算取必须常驻的事实（偏好 / 约束 / 核心事实）。
@@ -1116,7 +1120,8 @@ class MemoryDB:
         """
         if budget_tokens <= 0:
             return []
-        rows = self.facts(fact_types=fact_types, min_quality=min_quality, limit=limit)
+        types = list(fact_types) if fact_types else list(self.PINNED_TYPES)
+        rows = self.facts(fact_types=types, min_quality=min_quality, limit=limit)
         out: list[Memory] = []
         used = 0
         cpt = max(0.1, float(self._cfg.chars_per_token))
@@ -1153,6 +1158,7 @@ class MemoryDB:
         所以先用 facts_budget 把这块钉死，余量才给 FTS5 / 向量。
 
         返回列表 PIN 在前、检索结果在后，调用方按顺序拼 prompt 即可。
+        fact_types 同时作用于两段（PIN 与检索），不会出现「PIN 过滤了、检索没过滤」。
         """
         budget = int(total_budget)
         if budget <= 0:
@@ -1165,7 +1171,8 @@ class MemoryDB:
         if left <= 0 or not (query or "").strip():
             return pinned
         hits = self.recall(query, top_k=top_k, budget_tokens=left,
-                           min_quality=min_quality, session_id=session_id)
+                           min_quality=min_quality, session_id=session_id,
+                           fact_types=list(fact_types) if fact_types else None)
         seen = {m.atom_id for m in pinned if m.atom_id}
         return pinned + [m for m in hits if m.atom_id not in seen]
 

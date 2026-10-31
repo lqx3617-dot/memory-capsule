@@ -98,6 +98,10 @@ class MemoryConfig:
     enable_promote: bool = True
     promote_min_confidence: float = 0.55
     dedup_similarity: float = 0.9
+    # 核心事实保护：同 fact_type 下与新事实相似度 ≥ 此值，就直接拒绝新事实。
+    # 「名字是李跃铭」→「名字是王小明」这种同极性改写不会被 check_conflict 抓到，
+    # 只能靠这条挡住。
+    core_similarity: float = 0.85
     max_atom_chars: int = 2000
 
     # ---- 检索 ----
@@ -246,6 +250,7 @@ class MemoryConfig:
         self._require(0.0 <= self.promote_min_confidence <= 1.0,
                       "promote_min_confidence 需在 0..1")
         self._require(0.0 <= self.dedup_similarity <= 1.0, "dedup_similarity 需在 0..1")
+        self._require(0.0 <= self.core_similarity <= 1.0, "core_similarity 需在 0..1")
         self._require(self.max_atom_chars >= 16, "max_atom_chars 至少 16")
 
         for name in ("w_bm25", "w_quality", "w_recency"):

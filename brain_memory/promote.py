@@ -273,9 +273,31 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
             )
         return "merged", dup_id
 
+    # 核心事实保护（前移版）：同 fact_type 下只要有一条核心事实和新内容足够像，
+    # 就直接拒绝 —— 不依赖 check_conflict 是否判出冲突。
+    # 为什么需要前移：「名字是李跃铭」改成「名字是王小明」极性相同、没有数字，
+    # check_conflict 根本不认，核心保护就被绕过去了。
+    for row in conn.execute(
+        "SELECT id, content FROM atoms WHERE fact_type = ? AND state = 'active' "
+        "AND is_core = 1 ORDER BY id DESC LIMIT 20",
+        (fact_type,),
+    ).fetchall():
+        if similarity(content, str(row[1])) >= float(cfg.core_similarity):
+            conn.execute(
+                "INSERT INTO journal(action, target_table, target_id, detail_json, created_at) "
+                "VALUES ('core_protect', 'atoms', ?, ?, ?)",
+                (int(row[0]),
+                 json.dumps({"rejected_content": content[:200],
+                             "fact_type": fact_type,
+                             "similarity": round(similarity(content, str(row[1])), 3)},
+                            ensure_ascii=False),
+                 utc_now()),
+            )
+            return "rejected", None
+
     conflict_id, _conflict_sim = check_conflict(conn, content, fact_type, cfg)
 
-    # 核心事实保护：旧的那条 if is_core=1，新事实一律不许覆盖它。
+    # 核心事实保护（冲突版）：保留 —— check_conflict 判出冲突时再兜一次底。
     # 判断必须在插入新原子之前 —— 否则旧的下线、新的进来，就变成「被覆盖」了。
     if conflict_id is not None:
         row = conn.execute(
