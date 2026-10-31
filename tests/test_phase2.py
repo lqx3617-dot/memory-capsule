@@ -7,6 +7,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import brain_memory as bm
+from brain_memory.db import SCHEMA_VERSION
 from brain_memory.vec import HashEmbedder, pack_vector, unpack_vector, cosine
 
 FAILS = []
