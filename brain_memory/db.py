@@ -41,7 +41,7 @@ from .vec import VectorStore, resolve_embedder
 
 logger = logging.getLogger("brain_memory")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _FTS_TRIGRAM = "trigram"
 _FTS_UNICODE = "unicode61"
 
@@ -318,6 +318,29 @@ class MemoryDB:
     def _migrate(self, from_version: int) -> None:
         """逐版本升级：v1 -> v2（embedding），v2 -> v3（is_core）。"""
         assert self._writer is not None
+        if from_version < 5:
+            columns = {
+                str(row[1]) for row in self._writer.execute("PRAGMA table_info(atoms)").fetchall()
+            }
+            for col, ddl in (
+                ("s_short", "ALTER TABLE atoms ADD COLUMN s_short REAL NOT NULL DEFAULT 1.0"),
+                ("s_long", "ALTER TABLE atoms ADD COLUMN s_long REAL NOT NULL DEFAULT 0.3"),
+            ):
+                if col not in columns:
+                    try:
+                        self._writer.execute(ddl)
+                    except sqlite3.Error as exc:
+                        raise DatabaseError(f"迁移 v4->v5 失败({col}): {exc}") from exc
+            try:
+                self._writer.execute(
+                    "CREATE TABLE IF NOT EXISTS mem_graph ("
+                    "source_id INTEGER NOT NULL, target_id INTEGER NOT NULL, "
+                    "weight REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, "
+                    "PRIMARY KEY (source_id, target_id))")
+                self._writer.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_graph_target ON mem_graph(target_id)")
+            except sqlite3.Error as exc:
+                raise DatabaseError(f"迁移 v4->v5 失败(mem_graph): {exc}") from exc
         if from_version < 4:
             columns = {
                 str(row[1]) for row in self._writer.execute("PRAGMA table_info(atoms)").fetchall()
@@ -625,6 +648,16 @@ class MemoryDB:
                     "last_accessed_at = ? WHERE id = ?",
                     rows,
                 )
+                # 双速率的核心动作：每被召回一次，短期强度加一点（饱和到 1），
+                # 同时按比例漏进长期池 —— 这就是「短期记忆流转进长期记忆」。
+                conn.executemany(
+                    "UPDATE atoms SET "
+                    "s_short = MIN(1.0, s_short + ?), "
+                    "s_long = MIN(1.0, s_long + s_short * ?) "
+                    "WHERE id = ?",
+                    [(float(self._cfg.stm_gain), float(self._cfg.stm_to_ltm), int(a))
+                     for a, _t in delta.items()],
+                )
         except Exception:
             with self._access_lock:  # 刷盘失败就把增量放回去，不丢语义
                 for atom_id, times in delta.items():
@@ -860,6 +893,7 @@ class MemoryDB:
         sql = (
             "SELECT a.id, a.content, a.source_event_id, a.confidence, a.quality, "
             "a.fact_type, a.entity_id, a.access_count, a.feedback, a.is_core, a.mood, "
+            "a.s_short, a.s_long, "
             "a.created_at, a.last_accessed_at "
             "FROM atoms a LEFT JOIN raw_events e ON e.id = a.source_event_id "
             "WHERE a.state = 'active'"

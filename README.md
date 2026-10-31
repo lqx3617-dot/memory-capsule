@@ -377,7 +377,7 @@ python -m brain_memory --db mem.db --config journal_mode_target=DELETE stats
 
 ```bash
 sh check.sh          # 静态扫描 + 文档代码块 + 语法编译 + 真建库体检
-sh check.sh --full   # 再加 25 个测试脚本 + 3 个示例
+sh check.sh --full   # 再加 26 个测试脚本 + 3 个示例
 ```
 
 | 脚本 | 钉死的问题 |
@@ -407,6 +407,7 @@ sh check.sh --full   # 再加 25 个测试脚本 + 3 个示例
 | `test_core_fact` | `is_core` 保护：冲突时新事实被拒，旧的不下线 |
 | `test_recall_budget` | 预算式召回：PIN 在前、去重、小预算仍 PIN 优先 |
 | `test_endocrine` | 衰减公式、事件扰动、f_endo 同向放大、recall 零写 |
+| `test_graph` | 建双向边、电势扩散、PageRank 归一、双速率衰减 |
 | `embed_demo` | 全流程演示 |
 
 CI 在 Python 3.10 / 3.11 / 3.12 / 3.13 四档跑全套。
@@ -441,6 +442,8 @@ brain_memory/
 ├── forget.py      quality 打分与三态判定
 ├── dream.py       巩固：L3 实体页 + DREAMS.md
 ├── vec.py         Embedder 接口 / 三级后端 / 距离换算
+├── endocrine.py   内分泌心境（四激素、衰减、事件识别）
+├── graph.py       图谱联想（建边 / 电势扩散 / 个性化 PageRank）
 ├── locks.py       写优先读写锁 + 全局锁
 ├── config.py      MemoryConfig（74 项）
 ├── types.py       Memory / Stats / ForgetDecision + 枚举
@@ -452,7 +455,7 @@ mcp_server.py      MCP 服务器（7 工具，stdio + HTTP）
 memory_proxy.py    OpenAI 兼容记忆代理（自动注入 + 回写）
 scripts/           Termux 保活脚本 + 审查自查
 docs/              MCP / PLAN / PUBLIC_API / EMBEDDING / AGENT_RULES
-tests/             25 个测试脚本
+tests/             26 个测试脚本
 examples/          DSH 与 Operit 的接入配置示例
 ```
 

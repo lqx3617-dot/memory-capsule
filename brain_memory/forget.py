@@ -71,15 +71,22 @@ def compute_quality(
     now: datetime | None = None,
     refs: int = 0,
     access_count: int = 0,
+    s_short: float = 1.0,
+    s_long: float = 0.3,
 ) -> float:
     now = now or datetime.now(timezone.utc)
     if last_active is None:
         decay = 1.0
     else:
         age_days = max(0.0, (now - last_active).total_seconds() / 86400.0)
-        # 时间压缩：真实年龄先折算成等效天数，再代入衰减。
+        # 时间压缩：真实年龄先折算成等效天数。
         dt_eff = compress_age_days(age_days, cfg)
-        decay = 0.5 ** (dt_eff / half_life_days(cfg, fact_type))
+        # 双速率：短期池按小时掉（几小时内就淡），长期池按半衰期掉（几十天）。
+        # 两个池的强度各自带衰减，加权相加 —— 这就是「短期记忆流转进长期记忆」。
+        decay_s = math.exp(-(dt_eff * 24.0) / max(0.1, float(cfg.tau_short_h)))
+        decay_l = 0.5 ** (dt_eff / half_life_days(cfg, fact_type))
+        decay = (float(cfg.w_short) * max(0.0, float(s_short)) * decay_s
+                 + float(cfg.w_long) * max(0.0, float(s_long)) * decay_l)
     connectivity = 1.0 + math.log2(1.0 + max(0, refs) + max(0, access_count))
     quality = feedback * decay * connectivity
     return max(0.0, min(1.0, quality))
@@ -120,7 +127,7 @@ def scan(
     cfg = db.config
     sql = (
         "SELECT id, content, quality, access_count, feedback, fact_type, "
-        "created_at, last_accessed_at, state FROM atoms "
+        "s_short, s_long, created_at, last_accessed_at, state FROM atoms "
         "WHERE state IN ('active', 'silent', 'archived')"
     )
     params: list[object] = []
@@ -152,6 +159,8 @@ def scan(
                 now=now,
                 refs=refs.get(int(row["id"]), 0),
                 access_count=int(row["access_count"]),
+                s_short=float(row["s_short"]),
+                s_long=float(row["s_long"]),
             )
             action, reason = classify(cfg, quality, int(row["access_count"]))
             if action == "keep":
