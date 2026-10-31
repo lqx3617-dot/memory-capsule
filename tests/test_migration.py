@@ -16,6 +16,7 @@ import sqlite3
 import tempfile
 
 import brain_memory as bm
+from brain_memory.db import SCHEMA_VERSION
 from brain_memory.config import MemoryConfig
 from brain_memory.errors import ConfigError, SchemaVersionError
 from brain_memory.gate import _LlmClient
@@ -79,7 +80,9 @@ def main() -> int:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(atoms)")}
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
         check("embedding" in cols, "embedding 列补上了")
-        check(ver == 2, "user_version 升到 2（实际 %s）" % ver)
+        check("is_core" in cols, "is_core 列补上了")
+        check(ver == SCHEMA_VERSION,
+              "user_version 升到 %d（实际 %s）" % (SCHEMA_VERSION, ver))
 
         print("3. 索引与 FTS 是否补齐")
         idx = {r[0] for r in conn.execute(

@@ -193,10 +193,41 @@ def build_memory_block(
 
 
 def compose_system_prompt(persona: str, memory_block: str) -> str:
-    """人设在前，记忆在后 —— 记忆是补充约束，不该盖住人设。"""
+    """人设在前，记忆在后 —— 记忆是补充约束，不该盖住人设。
+
+    ⚠ 2026-10-31 起推荐用 compose_system_prompt_v2()：它把称呼规则放在最顶部，
+    并复用 examples/soul_prompt_builder.py，PIN 记忆与检索记忆分会两段。
+    """
     if not memory_block:
         return persona
     return persona + "\n\n" + memory_block
+
+
+def compose_system_prompt_v2(
+    *,
+    user_name: str,
+    persona: str,
+    db: "bm.MemoryDB",
+    user_text: str,
+    total_budget: int = 2500,
+    facts_budget: int = 800,
+) -> str:
+    """推荐写法：一次拿到「PIN 记忆 + 检索记忆」，直接拼成 system prompt。
+
+    两个关键点：
+    1. 用 recall_with_budget()，先按 800 token 保住偏好/约束，余量才给检索 ——
+       「别给我发语音」这种东西按关键词根本检索不到，但它比任何一条语义命中都重要。
+    2. 称呼规则放 prompt 最顶部，不用 compose_system_prompt() 的老顺序
+       （那边人设在前，规则容易被 persona 的长描述稀释掉）。
+    """
+    from examples.soul_prompt_builder import build_system_prompt
+
+    items = db.recall_with_budget(
+        user_text, total_budget=total_budget, facts_budget=facts_budget,
+    )
+    return build_system_prompt(
+        user_name=user_name, persona=persona, memory_items=items,
+    )
 
 
 # ---------------------------------------------------------------- 场景 A：私信

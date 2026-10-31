@@ -80,6 +80,7 @@ _SELECT = (
     "a.confidence AS confidence, a.quality AS quality, a.fact_type AS fact_type, "
     "a.entity_id AS entity_id, a.access_count AS access_count, a.feedback AS feedback, "
     "a.created_at AS created_at, a.last_accessed_at AS last_accessed_at, "
+    "a.is_core AS is_core, "
     "bm25(atoms_fts) AS rank "
     "FROM atoms_fts JOIN atoms a ON a.id = atoms_fts.rowid "
     "WHERE atoms_fts MATCH ? AND a.state = 'active'"
@@ -112,7 +113,7 @@ def _like_fallback(conn, query: str, limit: int) -> list:
     params = ["%" + t + "%" for t in toks]
     sql = (
         "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-        "entity_id, access_count, feedback, created_at, last_accessed_at, 0.0 AS rank "
+        "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, 0.0 AS rank "
         "FROM atoms WHERE state = 'active' AND (" + where + ") "
         "ORDER BY id DESC LIMIT ?"
     )
@@ -130,7 +131,7 @@ def _rrf(rankings: list[list[int]], k: int) -> dict[int, float]:
 
 _ROW_SQL = (
     "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-    "entity_id, access_count, feedback, created_at, last_accessed_at FROM atoms "
+    "entity_id, access_count, feedback, created_at, last_accessed_at, is_core FROM atoms "
     "WHERE state = 'active' AND id IN ({marks})"
 )
 
@@ -471,6 +472,7 @@ def search(
                 score=round(float(score), 6),
                 layer="L2",
                 truncated=truncated,
+                is_core=bool(row.get("is_core") or 0),
             )
         )
         if len(out) >= top_k:

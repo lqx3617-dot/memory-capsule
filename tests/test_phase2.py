@@ -7,6 +7,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import brain_memory as bm
+from brain_memory.db import SCHEMA_VERSION
 from brain_memory.vec import HashEmbedder, pack_vector, unpack_vector, cosine
 
 FAILS = []
@@ -112,19 +113,29 @@ def main():
     db4.ingest("s1", "user", "这个项目所有配置必须走环境变量")
     check(len(db4.recall("环境变量")) >= 1, "无向量时 recall 正常")
 
-    section("8. schema v1 -> v2 迁移")
+    section("8. schema 迁移（v1 库 → 当前版本）")
     v1path = os.path.join(tmp, "v1.db")
     schema = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brain_memory", "schema.sql"), encoding="utf-8").read()
-    v1sql = schema.replace(",\n    embedding           BLOB", "").replace("PRAGMA user_version = 2;", "PRAGMA user_version = 1;")
     conn = sqlite3.connect(v1path)
-    conn.executescript(v1sql)
+    conn.executescript(schema)
+    # 用当前 schema 建好，再「拆」回 v1：删掉后来加的列、把版本退回 1。
+    # 不靠字符串替换 schema 文本 —— 那种写法 schema.sql 一改格式就静默失效，
+    # 上一版就因为 user_version 从 2 变 3 而假绿了整个迁移测试。
+    for col in ("embedding", "is_core"):
+        try:
+            conn.execute("ALTER TABLE atoms DROP COLUMN " + col)
+        except sqlite3.Error:
+            pass
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
     conn.close()
     db5 = bm.MemoryDB(v1path)
     with db5._read_conn() as conn:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(atoms)").fetchall()]
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
     check("embedding" in cols, "迁移后 atoms 有 embedding 列")
-    check(ver == 2, "user_version 升到 2（实际 %s）" % ver)
+    check("is_core" in cols, "迁移后 atoms 有 is_core 列")
+    check(ver == SCHEMA_VERSION, "user_version 升到 %d（实际 %s）" % (SCHEMA_VERSION, ver))
     db5.close()
 
     section("9. 真 dream()：L3 实体页 + DREAMS.md")

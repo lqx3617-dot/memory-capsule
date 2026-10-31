@@ -12,12 +12,14 @@ from __future__ import annotations
 import importlib.resources
 import json
 import logging
+import math
 import os
 import queue
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any, Iterator
 
 from .config import MemoryConfig
@@ -39,7 +41,7 @@ from .vec import VectorStore, resolve_embedder
 
 logger = logging.getLogger("brain_memory")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _FTS_TRIGRAM = "trigram"
 _FTS_UNICODE = "unicode61"
 
@@ -311,8 +313,18 @@ class MemoryDB:
                 logger.warning("记忆胶囊: 建索引失败: %s (%s)", stmt, exc)
 
     def _migrate(self, from_version: int) -> None:
-        """逐版本升级。当前只处理 v1 -> v2（atoms 增加 embedding）。"""
+        """逐版本升级：v1 -> v2（embedding），v2 -> v3（is_core）。"""
         assert self._writer is not None
+        if from_version < 3:
+            columns = {
+                str(row[1]) for row in self._writer.execute("PRAGMA table_info(atoms)").fetchall()
+            }
+            if "is_core" not in columns:
+                try:
+                    self._writer.execute(
+                        "ALTER TABLE atoms ADD COLUMN is_core INTEGER NOT NULL DEFAULT 0")
+                except sqlite3.Error as exc:
+                    raise DatabaseError(f"迁移 v2->v3 失败: {exc}") from exc
         if from_version < 2:
             columns = {
                 str(row[1]) for row in self._writer.execute("PRAGMA table_info(atoms)").fetchall()
@@ -322,18 +334,18 @@ class MemoryDB:
                     self._writer.execute("ALTER TABLE atoms ADD COLUMN embedding BLOB")
                 except sqlite3.Error as exc:
                     raise DatabaseError(f"迁移 v1->v2 失败: {exc}") from exc
-            self._writer.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            with self._write_tx() as conn:
-                self._journal(
-                    conn,
-                    "schema_migrate",
-                    detail={"from": from_version, "to": SCHEMA_VERSION},
-                )
-            logger.info(
-                "记忆胶囊: schema 从 v%d 迁移到 v%d（新增 atoms.embedding）",
-                from_version,
-                SCHEMA_VERSION,
+        self._writer.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        with self._write_tx() as conn:
+            self._journal(
+                conn,
+                "schema_migrate",
+                detail={"from": from_version, "to": SCHEMA_VERSION},
             )
+        logger.info(
+            "记忆胶囊: schema 从 v%d 迁移到 v%d",
+            from_version,
+            SCHEMA_VERSION,
+        )
 
     @staticmethod
     def _read_schema_sql() -> str:
@@ -827,7 +839,7 @@ class MemoryDB:
         self._ensure_open()
         sql = (
             "SELECT a.id, a.content, a.source_event_id, a.confidence, a.quality, "
-            "a.fact_type, a.entity_id, a.access_count, a.feedback, "
+            "a.fact_type, a.entity_id, a.access_count, a.feedback, a.is_core, "
             "a.created_at, a.last_accessed_at "
             "FROM atoms a LEFT JOIN raw_events e ON e.id = a.source_event_id "
             "WHERE a.state = 'active'"
@@ -883,6 +895,7 @@ class MemoryDB:
                     score=quality,
                     layer="L2",
                     record_id=int(row["id"]),
+                    is_core=bool(row.get("is_core") or 0),
                 )
             )
         return out
@@ -1066,6 +1079,102 @@ class MemoryDB:
                 )
                 changed += int(cur.rowcount)
         return changed
+
+    def mark_core(self, atom_ids: int | list[int], core: bool = True) -> int:
+        """把原子标记为「核心事实」（或取消）。
+
+        核心事实在晋升的冲突检测里受保护：新事实与它冲突时**新事实被拒**，
+        旧的不下线。适合用户的身份、硬约束这类不该被后来的说法覆盖的内容。
+        """
+        self._ensure_open()
+        ids = [atom_ids] if isinstance(atom_ids, int) else list(atom_ids)
+        if not ids:
+            return 0
+        value = 1 if core else 0
+        changed = 0
+        with self._write_tx() as conn:
+            for atom_id in ids:
+                cur = conn.execute(
+                    "UPDATE atoms SET is_core = ? WHERE id = ?", (value, int(atom_id))
+                )
+                changed += int(cur.rowcount or 0)
+        return changed
+
+    def _est_tokens(self, text: str) -> int:
+        """按 chars_per_token 估算 token 数（与 recall 的预算口径一致）。"""
+        cpt = max(0.1, float(self._cfg.chars_per_token))
+        return max(1, int(math.ceil(len(text) / cpt)))
+
+    # 默认只钉「必须遵守」的类型。fact_types=None 时如果钉全表，
+    # 普通 fact / task 会先把 800 的预算吃掉，把真正的规则挤出去。
+    PINNED_TYPES = ("preference", "constraint", "convention")
+
+    def pin_facts(self, budget_tokens: int = 800, *,
+                  fact_types: list[str] | tuple[str, ...] | None = None,
+                  min_quality: float = 0.0,
+                  limit: int = 50) -> list[Memory]:
+        """按 token 预算取必须常驻的事实（偏好 / 约束 / 核心事实）。
+
+        返回的 Memory.layer 标成 PIN，调用方据此把它们放在 prompt 最前面。
+        超预算时最后一条会被截断（truncated=True），不会整条丢掉。
+        """
+        if budget_tokens <= 0:
+            return []
+        types = list(fact_types) if fact_types else list(self.PINNED_TYPES)
+        rows = self.facts(fact_types=types, min_quality=min_quality, limit=limit)
+        out: list[Memory] = []
+        used = 0
+        cpt = max(0.1, float(self._cfg.chars_per_token))
+        for m in rows:
+            cost = self._est_tokens(m.content)
+            remain = budget_tokens - used
+            if cost > remain:
+                if remain <= 4:          # 剩得太少，放进去也是噪音
+                    break
+                keep = max(1, int(remain * cpt))
+                out.append(replace(m, content=m.content[:keep], layer="PIN",
+                                   truncated=True))
+                used += remain
+                break
+            out.append(replace(m, layer="PIN"))
+            used += cost
+        return out
+
+    def recall_with_budget(
+        self,
+        query: str,
+        total_budget: int = 2500,
+        *,
+        facts_budget: int = 800,
+        top_k: int = 5,
+        fact_types: list[str] | tuple[str, ...] | None = None,
+        min_quality: float | None = None,
+        session_id: str | None = None,
+    ) -> list[Memory]:
+        """先保住长期偏好，剩下的额度再做语义检索。
+
+        顺序是有意的：facts() 里的内容（别发语音 / 必须走环境变量）
+        按关键词根本检索不到，但它们比任何一条语义命中都重要。
+        所以先用 facts_budget 把这块钉死，余量才给 FTS5 / 向量。
+
+        返回列表 PIN 在前、检索结果在后，调用方按顺序拼 prompt 即可。
+        fact_types 同时作用于两段（PIN 与检索），不会出现「PIN 过滤了、检索没过滤」。
+        """
+        budget = int(total_budget)
+        if budget <= 0:
+            return []
+        pin_budget = max(0, min(int(facts_budget), budget))
+        pinned = self.pin_facts(pin_budget, fact_types=fact_types,
+                                min_quality=min_quality or 0.0)
+        used = sum(self._est_tokens(m.content) for m in pinned)
+        left = budget - used
+        if left <= 0 or not (query or "").strip():
+            return pinned
+        hits = self.recall(query, top_k=top_k, budget_tokens=left,
+                           min_quality=min_quality, session_id=session_id,
+                           fact_types=list(fact_types) if fact_types else None)
+        seen = {m.atom_id for m in pinned if m.atom_id}
+        return pinned + [m for m in hits if m.atom_id not in seen]
 
     # ------------------------------------------------------------ 兼容层（零开销）
 

@@ -304,6 +304,10 @@ quality = clamp01( feedback × decay × connectivity )
 | 确认写入 | `remember(session_id, content, *, fact_type="fact", confidence=0.8)` | `raw_events.id`（**跳过门控**） |
 | 检索 | `recall(query, top_k=5, budget_tokens=2000, *, min_quality=None, fact_types=None, session_id=None, layer="L2", escalate=None)` | `list[Memory]` |
 | 列举 | `facts(*, session_id=None, fact_types=None, min_quality=0.0, limit=50)` | `list[Memory]`（不做语义检索） |
+| **预算召回** | `recall_with_budget(query, total_budget=2500, *, facts_budget=800, top_k=5, ...)` | `list[Memory]`（PIN 在前，检索在后） |
+| **钉住偏好** | `pin_facts(budget_tokens=800, ...)` | `list[Memory]`（`layer="PIN"`） |
+| **核心事实** | `mark_core(atom_ids, core=True)` | 改动行数 |
+| FTS 重建 | `rebuild_fts()` | `None` |
 | 遗忘 | `forget(dry_run=True, *, hard=False, confirm=False, limit=None, older_than_days=None)` | `list[dict]` |
 | 巩固 | `dream(*, persist=True, max_atoms=None)` | `str`（Markdown） |
 | 反馈 | `feedback(atom_ids, signal)` | 改动行数；signal = used / useful / noise |
@@ -371,7 +375,7 @@ python -m brain_memory --db mem.db --config journal_mode_target=DELETE stats
 
 ```bash
 sh check.sh          # 静态扫描 + 文档代码块 + 语法编译 + 真建库体检
-sh check.sh --full   # 再加 21 个测试脚本 + examples/embed_demo.py
+sh check.sh --full   # 再加 24 个测试脚本 + 2 个示例
 ```
 
 | 脚本 | 钉死的问题 |
@@ -397,6 +401,9 @@ sh check.sh --full   # 再加 21 个测试脚本 + examples/embed_demo.py
 | `test_conflict` | 冲突判据两侧都钉住：该抓的抓、不该抓的不误伤 |
 | `test_migration` | v1 老库原地升级、未来版本拒绝、旧配置报错、`extract_llm_*` 回落 |
 | `test_dream` | 孤儿实体页清理、`persist=False` 不写库、DREAMS.md 原子落盘 |
+| `test_age_compress` | dt_eff 四个区间与封顶，老记忆不再被当成「忘了」 |
+| `test_core_fact` | `is_core` 保护：冲突时新事实被拒，旧的不下线 |
+| `test_recall_budget` | 预算式召回：PIN 在前、去重、小预算只出 PIN |
 | `embed_demo` | 全流程演示 |
 
 CI 在 Python 3.10 / 3.11 / 3.12 / 3.13 四档跑全套。
@@ -442,7 +449,7 @@ mcp_server.py      MCP 服务器（7 工具，stdio + HTTP）
 memory_proxy.py    OpenAI 兼容记忆代理（自动注入 + 回写）
 scripts/           Termux 保活脚本 + 审查自查
 docs/              MCP / PLAN / PUBLIC_API / EMBEDDING / AGENT_RULES
-tests/             21 个测试脚本
+tests/             24 个测试脚本
 examples/          DSH 与 Operit 的接入配置示例
 ```
 

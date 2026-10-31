@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS atoms (
     last_accessed_at    TEXT,
     created_at          TEXT    NOT NULL,
     supersedes_id       INTEGER REFERENCES atoms(id) ON DELETE SET NULL,
+    -- 核心事实：晋升时如果旧事实 is_core=1，新事实一律不许覆盖它
+    is_core             INTEGER NOT NULL DEFAULT 0,
     state               TEXT    NOT NULL DEFAULT 'active'
                         CHECK (state IN ('active', 'silent', 'archived', 'superseded')),
     state_changed_at    TEXT,
@@ -101,4 +103,5 @@ CREATE INDEX IF NOT EXISTS idx_journal_created ON journal(created_at);
 
 -- 版本号最后写：所有表建成功后才写版本，避免半成品库被误认。
 -- v1 -> v2：atoms 增加 embedding BLOB（向量本身，vec0 只是可选加速索引）
-PRAGMA user_version = 2;
+-- v2 -> v3：atoms 增加 is_core（核心事实保护），衰老改用 dt_eff 时间压缩
+PRAGMA user_version = 3;

@@ -34,6 +34,34 @@ def half_life_days(cfg: MemoryConfig, fact_type: str) -> float:
     return cfg.halflife_semantic_d
 
 
+def compress_age_days(age_days: float, cfg: MemoryConfig) -> float:
+    """真实年龄 → 等效天数 dt_eff（时间压缩）。
+
+    | 真实年龄 | dt_eff |
+    |---|---|
+    | < 7 天 | 原样（近期衰减要真实，该淡就淡） |
+    | 7~30 天 | 7 + (age-7) × 0.5 |
+    | > 30 天 | 18.5 + (age-30) × 0.15 |
+    | 任何情况 | 不超过 age_compress_cap_d（默认 90） |
+
+    为什么这么做：真实时间下，语义记忆 90 天半衰期意味着「两个月前提过的事」
+    衰减到 0.63、半年后 0.25 —— 用户会觉得「它把我忘了」。
+    压缩后半年只算成 18.5 + 150×0.15 ≈ 41 天，还剩 0.73。
+    近期（7 天内）不压缩，保证「昨天说的」和「一小时前说的」仍有区别。
+    """
+    age = max(0.0, float(age_days))
+    knee1 = float(cfg.age_compress_knee1_d)
+    knee2 = float(cfg.age_compress_knee2_d)
+    if age <= knee1:
+        dt = age
+    elif age <= knee2:
+        dt = knee1 + (age - knee1) * float(cfg.age_compress_factor_mid)
+    else:
+        mid_span = knee1 + (knee2 - knee1) * float(cfg.age_compress_factor_mid)
+        dt = mid_span + (age - knee2) * float(cfg.age_compress_factor_far)
+    return min(dt, float(cfg.age_compress_cap_d))
+
+
 def compute_quality(
     *,
     cfg: MemoryConfig,
@@ -49,7 +77,9 @@ def compute_quality(
         decay = 1.0
     else:
         age_days = max(0.0, (now - last_active).total_seconds() / 86400.0)
-        decay = 0.5 ** (age_days / half_life_days(cfg, fact_type))
+        # 时间压缩：真实年龄先折算成等效天数，再代入衰减。
+        dt_eff = compress_age_days(age_days, cfg)
+        decay = 0.5 ** (dt_eff / half_life_days(cfg, fact_type))
     connectivity = 1.0 + math.log2(1.0 + max(0, refs) + max(0, access_count))
     quality = feedback * decay * connectivity
     return max(0.0, min(1.0, quality))
