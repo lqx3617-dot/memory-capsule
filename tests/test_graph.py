@@ -32,11 +32,15 @@ def main() -> int:
     print("1. 建边：相似的原子之间连双向边")
     db = bm.MemoryDB(":memory:")
     try:
-        db.remember("s", "数据库统一用 SQLite 做存储，必须开 WAL", fact_type="decision")
-        db.remember("s", "数据库统一用 SQLite 做存储，必须开 WAL 模式", fact_type="decision")
+        # 两条要「够像能连边、又不像到被去重合并」：相似度落在 0.35~0.9 之间。
+        db.remember("s", "数据库统一用 SQLite 做存储", fact_type="decision")
+        db.remember("s", "SQLite 必须开 WAL 模式，事务提交更快", fact_type="decision")
         db.remember("s", "今天天气不错", fact_type="fact")
         atoms = db.facts(fact_types=["decision"])
         check(len(atoms) == 2, "两条 decision（%d）" % len(atoms))
+        if len(atoms) < 2:
+            print("  [SKIP] 两条被合并了，后面的边断言跳过")
+            return 1
         a, b = atoms[0].atom_id, atoms[1].atom_id
         rel = edges_of(db, a)
         check(b in rel, "a -> b 有边（权重 %.2f）" % rel.get(b, 0))
