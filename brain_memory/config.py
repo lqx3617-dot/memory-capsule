@@ -99,9 +99,13 @@ class MemoryConfig:
     promote_min_confidence: float = 0.55
     dedup_similarity: float = 0.9
     # 核心事实保护：同 fact_type 下与新事实相似度 ≥ 此值，就直接拒绝新事实。
-    # 「名字是李跃铭」→「名字是王小明」这种同极性改写不会被 check_conflict 抓到，
-    # 只能靠这条挡住。
-    core_similarity: float = 0.85
+    #
+    # 为什么是 0.6 而不是 0.85：「爸爸的名字是李跃铭」→「爸爸的名字是王小明」
+    # 的字符串相似度只有 0.667 —— 只换了一个值，公共部分占比不高。
+    # 阈值定太高，最典型的「改名字」反而漏过去。
+    # 代价是可能误挡一些「相似但不同」的事实；但核心事实是用户手动标的，
+    # 误挡的损失（新事实进不来，看得见）比漏挡（身份被改掉，看不见）小。
+    core_similarity: float = 0.6
     max_atom_chars: int = 2000
 
     # ---- 检索 ----
