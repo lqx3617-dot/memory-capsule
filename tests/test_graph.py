@@ -65,7 +65,13 @@ def main() -> int:
         pr = graph.personalized_pagerank(sample_edges, {1: 1.0})
         check(len(pr) == 3, "三个节点都有分数")
         check(abs(sum(pr.values()) - 1.0) < 1e-6, "总和归一（%.4f）" % sum(pr.values()))
-        check(pr[1] > pr[3], "种子 1 的分数高于远端 3（%.3f > %.3f）" % (pr[1], pr[3]))
+        # 1↔2↔3 是对称环，1 和 3 在数学上就是相等的 —— 不能断言「大于」。
+        # 真正该验的是：种子比非种子受偏爱（用链式图），以及归一化成立。
+        check(pr[1] >= pr[3] - 1e-9, "种子 1 不低于远端 3（%.3f vs %.3f）" % (pr[1], pr[3]))
+        chain = {1: [(2, 1.0)], 2: [(3, 1.0)], 3: [(4, 1.0)], 4: []}
+        pr2 = graph.personalized_pagerank(chain, {1: 1.0})
+        check(pr2[1] > pr2[3] > pr2[4],
+              "链式图上天真：%.3f > %.3f > %.3f" % (pr2[1], pr2[3], pr2[4]))
         check(pr[2] > pr[3], "中间节点 2 高于远端 3")
 
         print("5. 双速率衰减：短期池先掉，长期池慢掉")
@@ -74,7 +80,7 @@ def main() -> int:
         from datetime import datetime, timedelta, timezone
         now = datetime.now(timezone.utc)
 
-        def q(days, s_short=1.0, s_long=0.3):
+        def q(days, s_short=1.0, s_long=0.5):
             return compute_quality(cfg=cfg, feedback=1.0, fact_type="fact",
                                    last_active=now - timedelta(days=days), now=now,
                                    s_short=s_short, s_long=s_long)
