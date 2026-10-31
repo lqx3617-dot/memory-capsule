@@ -146,6 +146,10 @@ class MemoryConfig:
     dream_max_clusters: int = 20
     dreams_path: str | None = None       # 缺省写到 DB 同目录 DREAMS.md
 
+    # ---- 内分泌心境 ----
+    enable_endocrine: bool = True    # 关掉后 f_endo 恒为 1.0，检索行为回到纯打分
+    endo_cache_seconds: float = 60.0  # 每条消息都读一次 system_state 太贵，缓存这么久
+
     # ---- 遗忘 ----
     # 时间压缩（dt_eff）：真实年龄 → 等效天数，再代入衰减。
     # 目的：7 天内的近期记忆按真实衰减（该淡就淡），

@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS atoms (
     supersedes_id       INTEGER REFERENCES atoms(id) ON DELETE SET NULL,
     -- 核心事实：晋升时如果旧事实 is_core=1，新事实一律不许覆盖它
     is_core             INTEGER NOT NULL DEFAULT 0,
+    -- 写入那一刻的心情值（-1~1），recall 的 f_endo 用它做同向放大
+    mood                REAL    NOT NULL DEFAULT 0,
     state               TEXT    NOT NULL DEFAULT 'active'
                         CHECK (state IN ('active', 'silent', 'archived', 'superseded')),
     state_changed_at    TEXT,
@@ -88,6 +90,14 @@ CREATE TABLE IF NOT EXISTS entity_pages (
     updated_at TEXT
 );
 
+-- ---------------------------------------------------------------- 内分泌状态
+-- 四个激素量，一行一个。基线见 endocrine.HORMONES。
+CREATE TABLE IF NOT EXISTS system_state (
+    key        TEXT PRIMARY KEY,
+    value      REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- ---------------------------------------------------------------- L4 审计日志
 CREATE TABLE IF NOT EXISTS journal (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,4 +114,5 @@ CREATE INDEX IF NOT EXISTS idx_journal_created ON journal(created_at);
 -- 版本号最后写：所有表建成功后才写版本，避免半成品库被误认。
 -- v1 -> v2：atoms 增加 embedding BLOB（向量本身，vec0 只是可选加速索引）
 -- v2 -> v3：atoms 增加 is_core（核心事实保护），衰老改用 dt_eff 时间压缩
-PRAGMA user_version = 3;
+-- v3 -> v4：atoms 增加 mood（写入时的心情快照）；新增 system_state（内分泌四量）
+PRAGMA user_version = 4;

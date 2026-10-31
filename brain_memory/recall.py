@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterable
 
+from .endocrine import f_endo
 from .forget import compute_quality
 from .types import Memory, parse_utc
 
@@ -80,7 +81,7 @@ _SELECT = (
     "a.confidence AS confidence, a.quality AS quality, a.fact_type AS fact_type, "
     "a.entity_id AS entity_id, a.access_count AS access_count, a.feedback AS feedback, "
     "a.created_at AS created_at, a.last_accessed_at AS last_accessed_at, "
-    "a.is_core AS is_core, "
+    "a.is_core AS is_core, a.mood AS mood, "
     "bm25(atoms_fts) AS rank "
     "FROM atoms_fts JOIN atoms a ON a.id = atoms_fts.rowid "
     "WHERE atoms_fts MATCH ? AND a.state = 'active'"
@@ -113,7 +114,7 @@ def _like_fallback(conn, query: str, limit: int) -> list:
     params = ["%" + t + "%" for t in toks]
     sql = (
         "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-        "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, 0.0 AS rank "
+        "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, mood, 0.0 AS rank "
         "FROM atoms WHERE state = 'active' AND (" + where + ") "
         "ORDER BY id DESC LIMIT ?"
     )
@@ -131,7 +132,7 @@ def _rrf(rankings: list[list[int]], k: int) -> dict[int, float]:
 
 _ROW_SQL = (
     "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-    "entity_id, access_count, feedback, created_at, last_accessed_at, is_core FROM atoms "
+    "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, mood FROM atoms "
     "WHERE state = 'active' AND id IN ({marks})"
 )
 
@@ -435,6 +436,23 @@ def search(
             ranked_items.append((atom_id, score))
         ranked_items.sort(key=lambda item: item[1], reverse=True)
 
+    # ---- 情绪系数 f_endo ----
+    # 心情好时更容易想起开心的事：乘一个和「当前心情 × 记忆心情」同向的系数。
+    # 放在排序之后再乘、乘完再排一次 —— 否则乘了系数却不重排，等于没生效。
+    mood_now = 0.0
+    if cfg.enable_endocrine:
+        try:
+            mood_now = float(db._mood_now())
+        except Exception:
+            mood_now = 0.0
+    if mood_now and ranked_items:
+        ranked_items = [
+            (atom_id,
+             score * f_endo(mood_now, float(rows_by_id[atom_id].get("mood") or 0.0)))
+            for atom_id, score in ranked_items
+        ]
+        ranked_items.sort(key=lambda item: item[1], reverse=True)
+
     # ---- 预算截断 ----
     out: list[Memory] = []
     used_tokens = 0
@@ -473,6 +491,7 @@ def search(
                 layer="L2",
                 truncated=truncated,
                 is_core=bool(row.get("is_core") or 0),
+                mood=float(row.get("mood") or 0.0),
             )
         )
         if len(out) >= top_k:

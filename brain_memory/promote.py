@@ -231,7 +231,8 @@ def check_conflict(
 # ---------------------------------------------------------------- 晋升主流程
 
 
-def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tuple[str, int | None]:
+def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any],
+                      mood: float = 0.0) -> tuple[str, int | None]:
     """在调用方事务内执行。返回 (status, atom_id)。"""
     content = normalize(cand.get("content", ""))
     fact_type = str(cand.get("fact_type") or "fact")
@@ -318,8 +319,8 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
     cur = conn.execute(
         "INSERT INTO atoms(entity_id, fact_type, content, confidence, quality, "
         "access_count, created_at, supersedes_id, state, source_event_id, "
-        "source_candidate_id, feedback) "
-        "VALUES (?,?,?,?,?,0,?,?,'active',?,?,1.0)",
+        "source_candidate_id, feedback, mood) "
+        "VALUES (?,?,?,?,?,0,?,?,'active',?,?,1.0,?)",
         (
             entity_id,
             fact_type,
@@ -330,6 +331,7 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any]) -> tup
             conflict_id,
             raw_event_id,
             cand.get("id"),
+            max(-1.0, min(1.0, float(mood))),
         ),
     )
     atom_id = int(cur.lastrowid)
