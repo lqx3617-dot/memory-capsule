@@ -46,10 +46,12 @@ def main() -> int:
         ids = [m.atom_id for m in items if m.atom_id]
         check(len(ids) == len(set(ids)), "没有重复 atom（%d 条）" % len(ids))
 
-        print("5. 预算极小：只给 PIN，不炸")
+        print("5. 预算极小：PIN 优先，且不超预算")
         tiny = db.recall_with_budget("检索排序", total_budget=60, facts_budget=60)
-        print("    [INFO] 极小预算返回 %d 条" % len(tiny))
-        check(all(m.layer == "PIN" for m in tiny), "小预算下只出 PIN")
+        print("    [INFO] 极小预算返回 %d 条（%s）" % (len(tiny), [m.layer for m in tiny]))
+        # 不能断言「只出 PIN」—— PIN 可能只用了 21 token，余量足够检索出一两条。
+        # 该守的是两件事：PIN 仍然排在最前、总量不超预算。
+        check(bool(tiny) and tiny[0].layer == "PIN", "小预算下 PIN 仍排第一")
         total_tokens = sum(db._est_tokens(m.content) for m in tiny)
         check(total_tokens <= 60, "没超预算（估 %d token）" % total_tokens)
 
