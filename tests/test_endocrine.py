@@ -108,6 +108,55 @@ def main() -> int:
     finally:
         db.close()
 
+    print("10. 事件识别 detect_event")
+    from brain_memory.endocrine import detect_event
+    cases = [
+        ("你真是个废物", "insult"),
+        ("谢谢你，太厉害了", "praise"),
+        ("今天好开心哈哈哈", "joy"),
+        ("加班到现在，累死了", "stress"),
+        ("别急，慢慢来", "calm"),
+    ]
+    for text, want in cases:
+        hit = detect_event(text)
+        got = hit[0] if hit else None
+        check(got == want, "%-18r -> %s（期望 %s）" % (text, got, want))
+    check(detect_event("今天天气不错") is None, "「今天天气不错」不判成夸奖（不错不在词表里）")
+    check(detect_event("你不厉害") is None or detect_event("你不厉害")[0] != "praise",
+          "「你不厉害」因否定前缀不判成夸奖")
+    strong = detect_event("你真是个废物！！！")
+    weak = detect_event("有点蠢")
+    check(strong and weak and strong[1] > weak[1],
+          "带感叹号更强：%.2f > %.2f" % (strong[1] if strong else 0, weak[1] if weak else 0))
+
+    print("11. db.note_event：识别 + 扰动一步到位")
+    db3 = bm.MemoryDB(":memory:")
+    try:
+        before = db3.endocrine.tick()
+        hit = db3.note_event("你真是个废物")
+        after = db3.endocrine.current()
+        check(hit is not None and hit[0] == "insult", "识别为 insult")
+        check(after["h_cort"] > before["h_cort"],
+              "皮质醇 %.2f -> %.2f" % (before["h_cort"], after["h_cort"]))
+        check(db3.note_event("今天天气不错") is None, "普通句子不改激素")
+
+        print("12. ingest 自动识别（只认 user 说的）")
+        db4 = bm.MemoryDB(":memory:")
+        try:
+            base_cort = db4.endocrine.tick()["h_cort"]
+            db4.ingest("s", "user", "闭嘴，你个垃圾")
+            up = db4.endocrine.current()["h_cort"]
+            check(up > base_cort, "用户骂人：皮质醇 %.2f -> %.2f" % (base_cort, up))
+            mid = db4.endocrine.current()["h_cort"]
+            db4.ingest("s", "assistant", "你真是个废物")
+            same = db4.endocrine.current()["h_cort"]
+            check(abs(same - mid) < 1e-9,
+                  "assistant 复述不改心情（%.4f == %.4f）" % (mid, same))
+        finally:
+            db4.close()
+    finally:
+        db3.close()
+
     print("\n%s" % ("全部通过" if not FAILS else "失败 %d 项" % len(FAILS)))
     return 0 if not FAILS else 1
 

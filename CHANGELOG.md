@@ -57,6 +57,22 @@ f_endo = 1 + 0.35 × (当前心情 × 记忆写入时的心情)
 - `atoms` 加 `mood REAL NOT NULL DEFAULT 0`
 - 新增 `system_state` 表（老库打开时由 `EndocrineSystem.ensure()` 幂等建）
 
+### 事件识别 `detect_event()`
+
+引擎只负责「给定事件后的激素变化」，不负责认事件 —— 现在补上：
+
+```python
+db.note_event("你真是个废物")      # -> ("insult", 0.68)
+db.note_event("今天天气不错")      # -> None（不改激素）
+```
+
+- 六类关键词：`insult` / `praise` / `joy` / `stress` / `calm` / `ignored`
+- 强度：基础 0.6，感叹号、叠字、长句各自加一点，封在 0.3~1.5
+- **否定前缀**：「你不厉害」不算夸奖
+- **宁可漏判不误判**：「不错」特意没放进词表 —— 否则「今天天气不错」会改心情
+
+`ingest(role="user")` 时自动调（`auto_detect_events=True`）；assistant 复述不算。
+
 ### 演示
 
 `examples/mood_demo.py` 走一遍对话主流程：骂一句 → 夸一句 → 心情好时写记忆 →

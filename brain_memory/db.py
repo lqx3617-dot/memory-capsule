@@ -721,6 +721,13 @@ class MemoryDB:
                 raise ValueError("meta 必须可 JSON 序列化") from exc
 
         ts = created_at or utc_now()
+        # 只对用户说的话做情绪识别：assistant 复述「你真废物」不该改心情。
+        # 放在门控之前 —— 用户骂人这件事本身就该立刻影响状态，不管它值不值得记住。
+        if role_norm == "user" and self._cfg.auto_detect_events:
+            try:
+                self.note_event(content)
+            except Exception:
+                pass
         # 门控放在事务外：LLM 可能慢，绝不能占着写锁
         gate = self._gate.evaluate(content, role=role_norm, db=self)
 
@@ -1217,6 +1224,27 @@ class MemoryDB:
             self._mood_val = 0.0
         self._mood_at = now
         return self._mood_val
+
+    def note_event(self, text: str) -> tuple[str, float] | None:
+        """识别一句话里的情绪事件并扰动激素，返回 (event_type, intensity)。
+
+        认不出事件就什么都不做（不写库），所以普通聊天不会产生额外事务。
+        """
+        if not self._cfg.enable_endocrine:
+            return None
+        try:
+            from .endocrine import detect_event
+            hit = detect_event(text)
+        except Exception:
+            return None
+        if hit is None:
+            return None
+        try:
+            self.endocrine.update_hormones(hit[0], hit[1])
+        except Exception:
+            return None
+        self._mood_at = 0.0        # 激素变了，缓存作废
+        return hit
 
     # ------------------------------------------------------------ 兼容层（零开销）
 
