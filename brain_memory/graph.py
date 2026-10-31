@@ -129,10 +129,10 @@ def personalized_pagerank(edges: dict[int, list[tuple[int, float]]],
             share = alpha * pr[source] / w
             for target, weight in edges.get(source, ()):
                 nxt[target] += share * max(0.0, float(weight))
-        base = (1.0 - alpha) * pr
+        # 逐节点算 (1-alpha) 的保留项 —— 不能写成 (1-alpha) * pr（pr 是 dict）
         spread_back = alpha * dangling / len(nodes)   # 悬挂点质量均摊，防总分流失
         for n in nodes:
-            nxt[n] += base[n] + spread_back
+            nxt[n] += (1.0 - alpha) * pr[n] + spread_back
         total2 = sum(nxt.values()) or 1.0
         pr = {n: v / total2 for n, v in nxt.items()}
     return pr
