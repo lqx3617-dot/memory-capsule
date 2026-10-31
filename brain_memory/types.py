@@ -28,6 +28,7 @@ JOURNAL_ACTIONS = (
     "merge",
     "conflict",
     "core_protect",    # 核心事实挡住了覆盖请求
+    "hormone_shift",   # 内分泌被事件扰动
     "silent",          # 与 ATOM_STATES / FORGET_ACTIONS 对齐；原来写成 silence，从未产生
     "archive",
     "revive",
@@ -100,6 +101,7 @@ class Memory:
     truncated: bool = False
     record_id: int | None = None   # 当前层的主键：L2=atom_id，L1=candidate.id，L0=raw_event.id
     is_core: bool = False          # 核心事实：冲突时受保护，新事实不许覆盖它
+    mood: float = 0.0              # 写入时的心情值（-1~1），供 f_endo 做同向放大
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -118,6 +120,7 @@ class Memory:
             "truncated": self.truncated,
             "record_id": self.record_id,
             "is_core": self.is_core,
+            "mood": self.mood,
         }
 
 

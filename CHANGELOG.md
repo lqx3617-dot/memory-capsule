@@ -1,5 +1,72 @@
 # 更新记录
 
+## v1.5.0 —— 2026-10-31
+
+第二阶段：内分泌心境引擎。
+
+### `brain_memory/endocrine.py`
+
+四个激素量，各自有基线，偏离后按指数回归：
+
+```
+h(t+dt) = h_base + (h(t) - h_base) * exp(-LAM_H * dt)
+
+h_sero 0.6  血清素（稳定）
+h_dopa 0.4  多巴胺（兴奋）
+h_cort 0.2  皮质醇（压力）
+h_oxy  0.5  催产素（亲近）
+LAM_H = 0.02 / 分钟  ->  半衰期约 35 分钟
+```
+
+存在 `system_state(key, value, updated_at)` 里，一行一个量。
+
+### 事件扰动
+
+```python
+db.endocrine.update_hormones("insult", 1.0)   # 骂：cort +0.30, sero -0.20
+db.endocrine.update_hormones("praise", 1.0)   # 夸：oxy +0.30, sero +0.10
+```
+
+内置七种：`insult` / `praise` / `joy` / `intimate` / `stress` / `calm` / `ignored`；
+未知事件按「无扰动」处理，不抛异常。每次扰动写 journal 的 `hormone_shift`。
+
+### f_endo：情绪系数乘在检索得分上
+
+```
+f_endo = 1 + 0.35 × (当前心情 × 记忆写入时的心情)
+```
+
+| 当前心情 | 记忆心情 | f_endo |
+|---|---|---|
+| +0.8 | +1.0（开心的事） | 1.28 |
+| +0.8 | -1.0（难过的事） | 0.72 |
+| 0 | 任意 | 1.00 |
+
+所以**心情好时更容易想起开心的事**，心情差时反过来。
+
+每条原子在写入时记一个 `mood`（当时的 valence 快照），recall 用它做同向放大。
+乘完之后**重新排一次序** —— 只乘不排等于没生效，这个坑在实现时踩过。
+
+### 零写的保证
+
+`recall` 承诺不写库，所以 `mood()` 默认**纯读**（只做衰减计算，不落盘），
+并且带 `endo_cache_seconds`（60 秒）缓存 —— 每条消息都读一次 `system_state` 太贵。
+
+### schema v3 → v4
+
+- `atoms` 加 `mood REAL NOT NULL DEFAULT 0`
+- 新增 `system_state` 表（老库打开时由 `EndocrineSystem.ensure()` 幂等建）
+
+### 演示
+
+`examples/mood_demo.py` 走一遍对话主流程：骂一句 → 夸一句 → 心情好时写记忆 →
+心情差时写记忆 → 心情好时检索看排序 → 三小时后回归基线。
+
+### 关掉它
+
+```python
+db = bm.MemoryDB(path, {"enable_endocrine": False})   # f_endo 恒为 1.0
+```
 ## v1.4.0 —— 2026-10-31
 
 第一阶段升级：**不破坏现有结构，强化核心记忆**。四件事。

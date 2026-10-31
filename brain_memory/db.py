@@ -41,7 +41,7 @@ from .vec import VectorStore, resolve_embedder
 
 logger = logging.getLogger("brain_memory")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _FTS_TRIGRAM = "trigram"
 _FTS_UNICODE = "unicode61"
 
@@ -108,6 +108,9 @@ class MemoryDB:
         self._access_lock = threading.Lock()
         self._access_delta: dict[int, int] = {}
         self._tx_local = threading.local()   # 记录本线程是否已在写事务里
+        self._endo: Any = None
+        self._mood_val: float = 0.0
+        self._mood_at: float = 0.0
 
         self._stop = threading.Event()
         self._flush_wakeup = threading.Event()
@@ -315,6 +318,16 @@ class MemoryDB:
     def _migrate(self, from_version: int) -> None:
         """逐版本升级：v1 -> v2（embedding），v2 -> v3（is_core）。"""
         assert self._writer is not None
+        if from_version < 4:
+            columns = {
+                str(row[1]) for row in self._writer.execute("PRAGMA table_info(atoms)").fetchall()
+            }
+            if "mood" not in columns:
+                try:
+                    self._writer.execute(
+                        "ALTER TABLE atoms ADD COLUMN mood REAL NOT NULL DEFAULT 0")
+                except sqlite3.Error as exc:
+                    raise DatabaseError(f"迁移 v3->v4 失败: {exc}") from exc
         if from_version < 3:
             columns = {
                 str(row[1]) for row in self._writer.execute("PRAGMA table_info(atoms)").fetchall()
@@ -769,7 +782,7 @@ class MemoryDB:
             if not (promote and self._cfg.enable_promote):
                 return event_id
 
-            status, atom_id = promote_candidate(conn, self._cfg, cand)
+            status, atom_id = promote_candidate(conn, self._cfg, cand, mood=self._mood_now())
             if status == "promoted" and atom_id is not None and self._vectors is not None:
                 # 同一事务内写向量：atoms.embedding + 可选 vec0
                 self._vectors.index_atom(conn, atom_id, cand["content"])
@@ -839,7 +852,7 @@ class MemoryDB:
         self._ensure_open()
         sql = (
             "SELECT a.id, a.content, a.source_event_id, a.confidence, a.quality, "
-            "a.fact_type, a.entity_id, a.access_count, a.feedback, a.is_core, "
+            "a.fact_type, a.entity_id, a.access_count, a.feedback, a.is_core, a.mood, "
             "a.created_at, a.last_accessed_at "
             "FROM atoms a LEFT JOIN raw_events e ON e.id = a.source_event_id "
             "WHERE a.state = 'active'"
@@ -896,6 +909,7 @@ class MemoryDB:
                     layer="L2",
                     record_id=int(row["id"]),
                     is_core=bool(row.get("is_core") or 0),
+                    mood=float(row.get("mood") or 0.0),
                 )
             )
         return out
@@ -959,7 +973,7 @@ class MemoryDB:
                 "confidence": confidence,
                 "entity_hint": None,
             }
-            status, atom_id = promote_candidate(conn, self._cfg, cand)
+            status, atom_id = promote_candidate(conn, self._cfg, cand, mood=self._mood_now())
             now = utc_now()
             if status == "rejected":
                 conn.execute(
@@ -1175,6 +1189,34 @@ class MemoryDB:
                            fact_types=list(fact_types) if fact_types else None)
         seen = {m.atom_id for m in pinned if m.atom_id}
         return pinned + [m for m in hits if m.atom_id not in seen]
+
+    # ------------------------------------------------------------ 内分泌
+
+    @property
+    def endocrine(self) -> Any:
+        """内分泌心境引擎（懒加载）。"""
+        if self._endo is None:
+            from .endocrine import EndocrineSystem
+            self._endo = EndocrineSystem(self)
+        return self._endo
+
+    def _mood_now(self) -> float:
+        """当前心情值 -1..1，带 TTL 缓存。
+
+        每条消息都去 system_state 读一次太贵（而且 recall 承诺零写），
+        所以缓存 endo_cache_seconds 秒。mood() 本身不落盘，只做衰减计算。
+        """
+        if not self._cfg.enable_endocrine:
+            return 0.0
+        now = time.monotonic()
+        if self._mood_at and (now - self._mood_at) < float(self._cfg.endo_cache_seconds):
+            return self._mood_val
+        try:
+            self._mood_val = float(self.endocrine.mood())
+        except Exception:
+            self._mood_val = 0.0
+        self._mood_at = now
+        return self._mood_val
 
     # ------------------------------------------------------------ 兼容层（零开销）
 
