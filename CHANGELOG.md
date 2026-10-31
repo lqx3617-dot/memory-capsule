@@ -52,6 +52,9 @@ quality ∝ feedback × (0.4 × s_short × decay_s + 0.6 × s_long × decay_l) �
 
 `tau_short_h=2 / w_short=0.4 / w_long=0.6 / stm_gain=0.15 / stm_to_ltm=0.02`
 是按「一天内还能想起来、一个月后还记得」标定的经验值，不是从图1 读数得来的。
+
+> `s_long` 的写入默认值是 **0.5** —— 一开始设 0.3，加权后刚写入的 quality 只有 0.58，
+> 低于 `dream_min_quality=0.6`，新记忆进不了巩固。这是 CI 抓出来的。
 形态（双指数相加）确凿，时间常数可以按实际体验再调。
 
 ### 关闭

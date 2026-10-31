@@ -72,7 +72,7 @@ def compute_quality(
     refs: int = 0,
     access_count: int = 0,
     s_short: float = 1.0,
-    s_long: float = 0.3,
+    s_long: float = 0.5,
 ) -> float:
     now = now or datetime.now(timezone.utc)
     if last_active is None:

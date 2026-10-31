@@ -156,7 +156,7 @@ def live_quality(cfg, row: dict) -> float:
             refs=0,
             access_count=int(row.get("access_count") or 0),
             s_short=float(row.get("s_short") if row.get("s_short") is not None else 1.0),
-            s_long=float(row.get("s_long") if row.get("s_long") is not None else 0.3),
+            s_long=float(row.get("s_long") if row.get("s_long") is not None else 0.5),
         )
     except Exception:
         return float(row.get("quality") or 0.0)

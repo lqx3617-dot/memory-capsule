@@ -324,7 +324,7 @@ class MemoryDB:
             }
             for col, ddl in (
                 ("s_short", "ALTER TABLE atoms ADD COLUMN s_short REAL NOT NULL DEFAULT 1.0"),
-                ("s_long", "ALTER TABLE atoms ADD COLUMN s_long REAL NOT NULL DEFAULT 0.3"),
+                ("s_long", "ALTER TABLE atoms ADD COLUMN s_long REAL NOT NULL DEFAULT 0.5"),
             ):
                 if col not in columns:
                     try:

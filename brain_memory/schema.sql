@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS atoms (
     -- 双速率衰减的两个池：s_short 按小时掉，s_long 按天掉；
     -- 每被访问一次，一部分从短期巩固进长期（见 forget.bump_strength）
     s_short             REAL    NOT NULL DEFAULT 1.0,
-    s_long              REAL    NOT NULL DEFAULT 0.3,
+    s_long              REAL    NOT NULL DEFAULT 0.5,
     state               TEXT    NOT NULL DEFAULT 'active'
                         CHECK (state IN ('active', 'silent', 'archived', 'superseded')),
     state_changed_at    TEXT,
