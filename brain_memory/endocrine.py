@@ -23,6 +23,7 @@ dt 的单位是**分钟**，LAM_H = 0.02 —— 半衰期约 35 分钟：
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -89,6 +90,82 @@ def f_endo(mood_now: float, mood_atom: float, gain: float = ENDO_GAIN) -> float:
       心情中性(0)                      → 1.00（完全不影响）
     """
     return 1.0 + float(gain) * float(mood_now) * float(mood_atom)
+
+
+# ---------------------------------------------------------------- 事件识别
+#
+# 只做「够用」的判断：关键词命中 + 少量强度修正。不用模型，不引入依赖。
+# 原则：宁可漏判，不要误判 —— 把「今天天气不错」判成夸奖，激素就开始乱跳。
+
+EVENT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "insult": ("傻", "蠢", "滚", "闭嘴", "废物", "垃圾", "去死", "讨厌你",
+               "烦死", "恶心", "智障", "有病", "没用", "差劲"),
+    "praise": ("厉害", "牛", "太棒", "真好", "爱你", "喜欢你", "佩服",
+               "靠谱", "优秀", "漂亮", "感谢", "辛苦了"),
+    "joy": ("开心", "高兴", "太好了", "哈哈", "笑死", "爽", "舒服",
+            "快乐", "搞定", "成了"),
+    "stress": ("累", "压力", "焦虑", "加班", "熬夜", "崩溃", "顶不住",
+               "受不了", "烦"),
+    "calm": ("别急", "慢慢来", "没事", "放松", "休息", "不急"),
+    "ignored": ("没人理", "不理我", "被无视", "冷场"),
+}
+
+# 判断顺序：越强的情绪越优先，一条消息只取一个事件
+_EVENT_PRIORITY = ("insult", "praise", "stress", "joy", "calm", "ignored")
+
+# 否定前缀：「不厉害」「没意思」不该算夸奖
+_NEGATIONS = ("不", "没", "别", "无", "哪有")
+
+
+def _negated(text: str, index: int) -> bool:
+    head = text[max(0, index - 3):index]
+    return any(head.endswith(neg) for neg in _NEGATIONS)
+
+
+def _intensity_of(text: str) -> float:
+    """强度：基础 0.6，感叹号/叠字/长句各加一点，封在 0.3~1.5。"""
+    score = 0.6
+    marks = text.count("!") + text.count("！")
+    if marks:
+        score += min(0.3, marks * 0.08)
+    if re.search(r"(。。|！！！|哈哈|啊啊)", text):
+        score += 0.1
+    if len(text) >= 50:
+        score += 0.1
+    return max(0.3, min(1.5, round(score, 2)))
+
+
+def detect_event(text: str) -> tuple[str, float] | None:
+    """从一句话里认出情绪事件，返回 (event_type, intensity)；认不出返回 None。
+
+    用法：
+
+        hit = detect_event("你真是个废物")
+        if hit:
+            db.endocrine.update_hormones(*hit)
+
+    db.note_event(text) 是「识别 + 更新」的合并版，通常直接用那个。
+    """
+    body = (text or "").strip()
+    if not body:
+        return None
+    hits: dict[str, int] = {}
+    for event_type, words in EVENT_KEYWORDS.items():
+        for word in words:
+            idx = body.find(word)
+            if idx < 0:
+                continue
+            if _negated(body, idx):
+                continue
+            hits[event_type] = hits.get(event_type, 0) + 1
+    if not hits:
+        return None
+    for event_type in _EVENT_PRIORITY:
+        if event_type in hits:
+            # 命中越多越强
+            bonus = min(0.2, 0.1 * (hits[event_type] - 1))
+            return event_type, min(1.5, _intensity_of(body) + bonus)
+    return None
 
 
 class EndocrineSystem:

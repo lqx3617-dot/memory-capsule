@@ -67,6 +67,15 @@ def main() -> int:
         db.endocrine.tick(minutes=180)
         show("3 小时后", db)
 
+        print("\n== 6.5 自动识别：不用手动点名，ingest 时自己认 ==")
+        db.ingest("s", "user", "闭嘴，你个垃圾")
+        show("被骂后", db)
+        db.ingest("s", "user", "谢谢你，太厉害了")
+        show("被夸后", db)
+        db.ingest("s", "user", "今天天气不错")
+        show("闲聊后", db)
+        print("  （闲聊不改心情 —— 「不错」特意没放进夸奖词表）")
+
         print("\n== 7. 关掉引擎：f_endo 恒为 1.0 ==")
         db2 = bm.MemoryDB(":memory:", {"enable_endocrine": False})
         try:

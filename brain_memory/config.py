@@ -149,6 +149,7 @@ class MemoryConfig:
     # ---- 内分泌心境 ----
     enable_endocrine: bool = True    # 关掉后 f_endo 恒为 1.0，检索行为回到纯打分
     endo_cache_seconds: float = 60.0  # 每条消息都读一次 system_state 太贵，缓存这么久
+    auto_detect_events: bool = True   # ingest(user) 时自动识别情绪事件并扰动激素
 
     # ---- 遗忘 ----
     # 时间压缩（dt_eff）：真实年龄 → 等效天数，再代入衰减。
