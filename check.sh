@@ -20,6 +20,7 @@ if [ -z "$PY" ]; then
 fi
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 FAILED=0
+FLAKY=0
 FULL=0
 
 for arg in "$@"; do
@@ -38,6 +39,8 @@ done
 
 ok()   { printf '  [OK]   %s\n' "$1"; }
 bad()  { printf '  [FAIL] %s\n' "$1"; FAILED=$((FAILED + 1)); }
+# 偶发（flaky）不算失败，但必须留痕 —— 重跑通过只说明「这次没复现」，不等于修好了。
+flaky() { printf '  [FLAKY] %s\n' "$1"; FLAKY=$((FLAKY + 1)); }
 warn() { printf '  [WARN] %s\n' "$1"; }
 step() { printf '\n== %s ==\n' "$1"; }
 
@@ -87,16 +90,32 @@ if [ "$FULL" -eq 1 ]; then
     rc=$?
     if [ "$rc" -eq 0 ]; then
       ok "$script"
-    else
-      bad "$script (exit=$rc)"
-      # 首跑输出就是证据。以前直接丢进 /dev/null，于是「断言全过却 exit=1」
-      # 这种 flaky 只能靠重跑猜 —— 重跑通常就绿了，什么也留不下。
-      printf '  ---- 首跑输出（末尾 40 行）----\n'
-      tail -40 "$LOG"
-      printf '  ---- 重跑（是否稳定复现）----\n'
-      ( cd "$ROOT" && "$PY" -X faulthandler "$script" 2>&1 | tail -20 )
+      rm -f "$LOG"
+      continue
     fi
-    rm -f "$LOG"
+    # 首跑失败 → 先留证据，再重跑一次，判断是「真失败」还是「偶发」。
+    # 首跑输出绝不能丢：以前直接进 /dev/null，这种偶发重跑就绿，什么也留不下。
+    printf '  ---- 首跑输出（末尾 40 行）----\n'
+    tail -40 "$LOG"
+    LOG2="${TMPDIR:-/tmp}/bm_check_$$_retry.log"
+    ( cd "$ROOT" && "$PY" -X faulthandler "$script" >"$LOG2" 2>&1 )
+    rc2=$?   # ⚠ 不能写成 `... | tail -20` —— 那样拿到的是 tail 的退出码
+    if [ "$rc2" -eq 0 ]; then
+      flaky "$script（首跑 exit=$rc / 重跑通过）"
+      printf '       重跑输出（末尾 20 行）\n'
+      tail -20 "$LOG2"
+      if [ -n "$GITHUB_ACTIONS" ]; then
+        printf '::warning::%s 偶发：首跑 exit=%s，重跑通过 —— 不算失败，但要跟进\n' "$script" "$rc"
+      fi
+      if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+        printf '- ⚠ `%s` 偶发：首跑 exit=%s / 重跑通过（详见本 job 日志）\n' "$script" "$rc" >>"$GITHUB_STEP_SUMMARY"
+      fi
+    else
+      bad "$script (首跑 exit=$rc，重跑 exit=$rc2)"
+      printf '  ---- 重跑输出（末尾 20 行）----\n'
+      tail -20 "$LOG2"
+    fi
+    rm -f "$LOG" "$LOG2"
   done
 else
   step "4/4 全量测试（--full 才跑）"
@@ -104,6 +123,9 @@ else
 fi
 
 printf '\n== 汇总 ==\n'
+if [ "$FLAKY" -gt 0 ]; then
+  printf '  偶发 %d 项（重跑通过，不计失败 —— 但别当没发生，见上面的 [FLAKY]）\n' "$FLAKY"
+fi
 if [ "$FAILED" -eq 0 ]; then
   printf '  全部通过\n'
   exit 0
