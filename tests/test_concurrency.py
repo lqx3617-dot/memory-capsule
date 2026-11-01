@@ -55,15 +55,18 @@ def main() -> int:
     print("3. 两个进程并发 open 同一个新库并写入")
     tmp = tempfile.mkdtemp(prefix="bm_conc_")
     db_path = os.path.join(tmp, "multi.db")
-    # 用随机串做内容：remember() 的去重很激进（相似度 0.9 + 无数字冲突就合并），
-    # 写「第 N 条」这种编号型文本会被并成一条，测不出并发行为。
+    # 内容必须「跨进程也不像」：纯 hex 只有 16 种字符，两条随机串的 trigram
+    # 偶尔能到 dedup_similarity=0.9 被当成重复合并 —— 实测 40 次里挂 1 次，
+    # 合并后只剩 39 条，断言 >= 40 就红。这里两重保险：长 base64（64 种字符）
+    # 让相似度趴在地上；每条带唯一编号，走「两条都带数字且不相交 → 不可能重复」。
     code = chr(10).join([
-        "import os, sys",
+        "import base64, os, sys",
         "sys.path.insert(0, %r)" % ROOT,
         "import brain_memory as bm",
         "db = bm.MemoryDB(%r)" % db_path,
         "for i in range(20):",
-        "    db.remember('p', os.urandom(8).hex() + '-' + sys.argv[1])",
+        "    noise = base64.b64encode(os.urandom(24)).decode()",
+        "    db.remember('p', '并发写入样本 %s-%d %s' % (sys.argv[1], i, noise))",
         "before = db.stats().counts",
         "db.close()",
         "print(sys.argv[1], dict(before))",

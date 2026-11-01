@@ -13,22 +13,22 @@ on:
 
 jobs:
   concurrency:
-    name: concurrency40-py${{ matrix.python }}
+    name: concurrency100-py${{ matrix.python }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: 连跑 40 次 test_concurrency，记录失败样本
+      - name: 连跑 100 次 test_concurrency，记录失败样本
         run: |
           mkdir -p /tmp/runs
           fail=0
-          for i in $(seq 1 40); do
+          for i in $(seq 1 100); do
             if python tests/test_concurrency.py >"/tmp/runs/$i.log" 2>&1; then
               :
             else
@@ -38,11 +38,11 @@ jobs:
               echo "::endgroup::"
             fi
           done
-          echo "失败 $fail / 40"
+          echo "失败 $fail / 100"
           {
-            echo "### py${{ matrix.python }}：test_concurrency 连跑 40 次"
+            echo "### py${{ matrix.python }}：test_concurrency 连跑 100 次"
             echo ""
             echo "| 次数 | 失败 |"
             echo "|---|---|"
-            echo "| 40 | $fail |"
+            echo "| 100 | $fail |"
           } >>"$GITHUB_STEP_SUMMARY"
