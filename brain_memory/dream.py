@@ -71,8 +71,11 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
     with db._read_conn() as conn:
         names = _entity_names(conn)
         rows = conn.execute(
+            # s_short / s_long 必须一起读：打分要用库里真实的两池强度，
+            # 否则召回多少次都看不出来（默认值会盖掉实际值）。
             "SELECT id, content, entity_id, fact_type, quality, confidence, "
-            "feedback, access_count, created_at, last_accessed_at FROM atoms "
+            "feedback, access_count, s_short, s_long, "
+            "created_at, last_accessed_at FROM atoms "
             "WHERE state = 'active' ORDER BY quality DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -90,6 +93,8 @@ def dream(db: "MemoryDB", *, persist: bool = True, max_atoms: int | None = None)
             last_active=parse_utc(row["last_accessed_at"]) or parse_utc(row["created_at"]),
             now=now_dt,
             access_count=int(row["access_count"]),
+            s_short=float(row["s_short"]) if row["s_short"] is not None else 1.0,
+            s_long=float(row["s_long"]) if row["s_long"] is not None else 0.5,
         )
         if quality < cfg.dream_min_quality:
             continue

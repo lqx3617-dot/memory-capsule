@@ -55,6 +55,7 @@ quality ∝ feedback × (0.4 × s_short × decay_s + 0.6 × s_long × decay_l) �
 
 > `s_long` 的写入默认值是 **0.5** —— 一开始设 0.3，加权后刚写入的 quality 只有 0.58，
 > 低于 `dream_min_quality=0.6`，新记忆进不了巩固。这是 CI 抓出来的。
+
 形态（双指数相加）确凿，时间常数可以按实际体验再调。
 
 ### 关闭
@@ -62,6 +63,20 @@ quality ∝ feedback × (0.4 × s_short × decay_s + 0.6 × s_long × decay_l) �
 ```python
 bm.MemoryDB(path, {"enable_graph": False})   # 退回纯打分
 ```
+### 评审修复（第三阶段）
+
+| 问题 | 位置 | 修法 |
+|---|---|---|
+| 刚写入的原子 quality 0.58 < `dream_min_quality=0.6`，进不了巩固 | `forget.py` / `schema.sql` | `s_long` 写入默认 0.3 → 0.5（0.4×1.0 + 0.6×0.5 = 0.7） |
+| 图谱测试两条 fixture 太像，被去重合并后 `atoms[1]` 越界 | `tests/test_graph.py` | 换成「能连边但不会被合并」的两句，并在合并时跳过后续断言 |
+| `dream()` 打分不读库里的两池强度，永远用默认值 | `dream.py` | SELECT 带 `s_short` / `s_long`，逐行传给 `compute_quality` |
+| 一次 flush 合并了 N 次命中，强度却只更新一次 | `db.py` | 按 `times` 次逐次递推（闭式，不循环），并抽出 `_apply_strength` |
+| 迁移建的 `mem_graph` 没有 `ON DELETE CASCADE` | `db.py` | 建表与 `schema.sql` 对齐；老表检测后重建并搬数据 |
+
+新增 `tests/test_strength.py`：把「合并 N 次 == 分 N 次 flush」和「dream 读库内强度」
+钉成确定行为。`check.sh --full` 失败时改为保留首跑输出 —— 之前直接丢进 `/dev/null`，
+「断言全过却 exit=1」这种偶发问题重跑就绿，什么证据都留不下。
+
 ## v1.5.1 —— 2026-10-31
 
 补完事件识别：`detect_event()` / `db.note_event()`，`ingest(user)` 自动接入。

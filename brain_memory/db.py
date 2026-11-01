@@ -77,6 +77,41 @@ def _normalize_path(p: str | os.PathLike[str]) -> str:
     return os.path.abspath(os.path.expanduser(p))
 
 
+def _apply_strength(
+    s_short: float,
+    s_long: float,
+    times: int,
+    gain: float,
+    to_ltm: float,
+) -> tuple[float, float]:
+    """把「合并了 times 次命中」按逐次递推作用到两个强度池。
+
+    单次动作（等价于 recall 里每命中一次）::
+
+        s_long  <- min(1, s_long + s_short * to_ltm)   # 现值漏进长期池
+        s_short <- min(1, s_short + gain)              # 短期池充能
+
+    递推 times 次有闭式：s_short_0 + k*gain 在 k <= m 时不饱和
+    （m = floor((1 - s_short_0) / gain)），其后每项恒为 1。
+    这样「一次 flush 合并了 1000 次命中」也不用循环 1000 次。
+    """
+    n = max(0, int(times))
+    short = max(0.0, min(1.0, float(s_short)))
+    long_ = max(0.0, min(1.0, float(s_long)))
+    if n == 0:
+        return (short, long_)
+    gain = max(0.0, float(gain))
+    to_ltm = max(0.0, float(to_ltm))
+    if gain <= 0.0:
+        # 短期池不充能：每次都按当前 short 漏，n 次等价于乘 n
+        return (short, min(1.0, long_ + to_ltm * short * n))
+    unsat = int(math.floor((1.0 - short) / gain + 1e-12))  # k <= unsat 时不饱和
+    span = min(n, unsat + 1)                               # k = 0 .. span-1
+    total = span * short + gain * span * (span - 1) / 2.0  # sum(short + k*gain)
+    total += max(0, n - span) * 1.0                        # 饱和项
+    return (min(1.0, short + gain * n), min(1.0, long_ + to_ltm * total))
+
+
 class MemoryDB:
     """可嵌入的长期记忆库。线程安全，进程内单实例使用。"""
 
@@ -331,12 +366,33 @@ class MemoryDB:
                         self._writer.execute(ddl)
                     except sqlite3.Error as exc:
                         raise DatabaseError(f"迁移 v4->v5 失败({col}): {exc}") from exc
+            # ⚠ 必须和 schema.sql 一致：带 ON DELETE CASCADE。
+            #   不带外键的话，硬删原子之后边上还挂着已消失的节点，
+            #   电势扩散 / PageRank 会把幽灵节点算进子图。
+            graph_ddl = (
+                "CREATE TABLE IF NOT EXISTS mem_graph ("
+                "source_id INTEGER NOT NULL REFERENCES atoms(id) ON DELETE CASCADE, "
+                "target_id INTEGER NOT NULL REFERENCES atoms(id) ON DELETE CASCADE, "
+                "weight REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, "
+                "PRIMARY KEY (source_id, target_id))")
             try:
-                self._writer.execute(
-                    "CREATE TABLE IF NOT EXISTS mem_graph ("
-                    "source_id INTEGER NOT NULL, target_id INTEGER NOT NULL, "
-                    "weight REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, "
-                    "PRIMARY KEY (source_id, target_id))")
+                existing = self._writer.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='mem_graph'"
+                ).fetchone()
+                if existing is None:
+                    self._writer.execute(graph_ddl)
+                elif "CASCADE" not in str(existing[0] or "").upper():
+                    # 早先的迁移建过不带外键的表：重建 + 搬数据（边的语义不变）
+                    self._writer.execute("ALTER TABLE mem_graph RENAME TO mem_graph_v4")
+                    self._writer.execute(graph_ddl)
+                    self._writer.execute(
+                        "INSERT OR IGNORE INTO mem_graph "
+                        "(source_id, target_id, weight, created_at) "
+                        "SELECT source_id, target_id, weight, created_at "
+                        "FROM mem_graph_v4 "
+                        "WHERE source_id IN (SELECT id FROM atoms) "
+                        "AND target_id IN (SELECT id FROM atoms)")
+                    self._writer.execute("DROP TABLE mem_graph_v4")
                 self._writer.execute(
                     "CREATE INDEX IF NOT EXISTS idx_graph_target ON mem_graph(target_id)")
             except sqlite3.Error as exc:
@@ -650,14 +706,32 @@ class MemoryDB:
                 )
                 # 双速率的核心动作：每被召回一次，短期强度加一点（饱和到 1），
                 # 同时按比例漏进长期池 —— 这就是「短期记忆流转进长期记忆」。
-                conn.executemany(
-                    "UPDATE atoms SET "
-                    "s_short = MIN(1.0, s_short + ?), "
-                    "s_long = MIN(1.0, s_long + s_short * ?) "
-                    "WHERE id = ?",
-                    [(float(self._cfg.stm_gain), float(self._cfg.stm_to_ltm), int(a))
-                     for a, _t in delta.items()],
-                )
+                # ⚠ note_access() 把同一原子的多次命中合并成一个 times，
+                #   所以这里必须按 times 次**逐次递推**（闭式算，不循环）：
+                #   只更新一次的话，「3 秒内命中 10 次」和「命中 1 次」对长期池的贡献一样。
+                gain = float(self._cfg.stm_gain)
+                to_ltm = float(self._cfg.stm_to_ltm)
+                ids = [int(a) for a in delta]
+                marks = ",".join("?" * len(ids))
+                current = {
+                    int(r[0]): (float(r[1]), float(r[2]))
+                    for r in conn.execute(
+                        "SELECT id, s_short, s_long FROM atoms WHERE id IN ("
+                        + marks + ")",
+                        ids,
+                    ).fetchall()
+                }
+                boosted: list[tuple[float, float, int]] = []
+                for atom_id, times in delta.items():
+                    s_short, s_long = current.get(int(atom_id), (1.0, 0.5))
+                    s_short_new, s_long_new = _apply_strength(
+                        s_short, s_long, int(times), gain, to_ltm
+                    )
+                    boosted.append((s_short_new, s_long_new, int(atom_id)))
+                if boosted:
+                    conn.executemany(
+                        "UPDATE atoms SET s_short = ?, s_long = ? WHERE id = ?", boosted
+                    )
         except Exception:
             with self._access_lock:  # 刷盘失败就把增量放回去，不丢语义
                 for atom_id, times in delta.items():

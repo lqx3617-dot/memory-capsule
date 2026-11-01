@@ -74,7 +74,7 @@ if [ "$FULL" -eq 1 ]; then
   step "4/4 全量测试"
   for script in tests/test_smoke.py tests/test_t4.py tests/test_phase2.py tests/test_escalation.py examples/embed_demo.py examples/soul_prompt_builder.py examples/mood_demo.py \
     tests/test_gate_assertive.py tests/test_revive.py tests/test_connectivity.py tests/test_vec_window.py \
-    tests/test_quality_live.py tests/test_call_name.py tests/test_vec_metric.py tests/test_mcp_server.py tests/test_memory_proxy.py tests/test_version.py tests/test_reindex.py tests/test_journal.py tests/test_indexes.py tests/test_concurrency.py tests/test_conflict.py tests/test_migration.py tests/test_dream.py tests/test_age_compress.py tests/test_core_fact.py tests/test_recall_budget.py tests/test_endocrine.py tests/test_graph.py; do
+    tests/test_quality_live.py tests/test_call_name.py tests/test_vec_metric.py tests/test_mcp_server.py tests/test_memory_proxy.py tests/test_version.py tests/test_reindex.py tests/test_journal.py tests/test_indexes.py tests/test_concurrency.py tests/test_conflict.py tests/test_migration.py tests/test_dream.py tests/test_age_compress.py tests/test_core_fact.py tests/test_recall_budget.py tests/test_endocrine.py tests/test_graph.py tests/test_strength.py; do
     if [ ! -f "$ROOT/$script" ]; then
       warn "$script 不存在，跳过"
       continue
@@ -82,14 +82,21 @@ if [ "$FULL" -eq 1 ]; then
     # 单独取退出码：有些失败是「测试自己说全部通过、退出码却非 0」，
     # 不打出来分不清是断言失败还是解释器/信号问题。
     # -X faulthandler：如果崩在 C 层（segfault / 断言失败），至少能看到栈
-    ( cd "$ROOT" && "$PY" -X faulthandler "$script" >/dev/null 2>&1 )
+    LOG="${TMPDIR:-/tmp}/bm_check_$$.log"
+    ( cd "$ROOT" && "$PY" -X faulthandler "$script" >"$LOG" 2>&1 )
     rc=$?
     if [ "$rc" -eq 0 ]; then
       ok "$script"
     else
       bad "$script (exit=$rc)"
+      # 首跑输出就是证据。以前直接丢进 /dev/null，于是「断言全过却 exit=1」
+      # 这种 flaky 只能靠重跑猜 —— 重跑通常就绿了，什么也留不下。
+      printf '  ---- 首跑输出（末尾 40 行）----\n'
+      tail -40 "$LOG"
+      printf '  ---- 重跑（是否稳定复现）----\n'
       ( cd "$ROOT" && "$PY" -X faulthandler "$script" 2>&1 | tail -20 )
     fi
+    rm -f "$LOG"
   done
 else
   step "4/4 全量测试（--full 才跑）"
