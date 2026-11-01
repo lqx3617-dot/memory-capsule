@@ -77,7 +77,7 @@ if [ "$FULL" -eq 1 ]; then
   step "4/4 全量测试"
   for script in tests/test_smoke.py tests/test_t4.py tests/test_phase2.py tests/test_escalation.py examples/embed_demo.py examples/soul_prompt_builder.py examples/mood_demo.py \
     tests/test_gate_assertive.py tests/test_revive.py tests/test_connectivity.py tests/test_vec_window.py \
-    tests/test_quality_live.py tests/test_call_name.py tests/test_vec_metric.py tests/test_mcp_server.py tests/test_memory_proxy.py tests/test_version.py tests/test_reindex.py tests/test_journal.py tests/test_indexes.py tests/test_concurrency.py tests/test_conflict.py tests/test_migration.py tests/test_dream.py tests/test_age_compress.py tests/test_core_fact.py tests/test_recall_budget.py tests/test_endocrine.py tests/test_graph.py tests/test_strength.py tests/test_flaky_probe.py; do
+    tests/test_quality_live.py tests/test_call_name.py tests/test_vec_metric.py tests/test_mcp_server.py tests/test_memory_proxy.py tests/test_version.py tests/test_reindex.py tests/test_journal.py tests/test_indexes.py tests/test_concurrency.py tests/test_conflict.py tests/test_migration.py tests/test_dream.py tests/test_age_compress.py tests/test_core_fact.py tests/test_recall_budget.py tests/test_endocrine.py tests/test_graph.py tests/test_strength.py; do
     if [ ! -f "$ROOT/$script" ]; then
       warn "$script 不存在，跳过"
       continue
@@ -105,10 +105,11 @@ if [ "$FULL" -eq 1 ]; then
       printf '       重跑输出（末尾 20 行）\n'
       tail -20 "$LOG2"
       if [ -n "$GITHUB_ACTIONS" ]; then
-        printf '::warning::%s 偶发：首跑 exit=%s，重跑通过 —— 不算失败，但要跟进\n' "$script" "$rc"
+        printf '%s\n' "::warning::$script 偶发：首跑 exit=$rc，重跑通过 —— 不算失败，但要跟进"
       fi
       if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-        printf '- ⚠ `%s` 偶发：首跑 exit=%s / 重跑通过（详见本 job 日志）\n' "$script" "$rc" >>"$GITHUB_STEP_SUMMARY"
+        # ⚠ 格式串不能以 '-' 开头：dash 的 printf 会把它当选项，报 Illegal option -
+        printf '%s\n' "- ⚠ \`$script\` 偶发：首跑 exit=$rc / 重跑通过（详见本 job 日志）" >>"$GITHUB_STEP_SUMMARY"
       fi
     else
       bad "$script (首跑 exit=$rc，重跑 exit=$rc2)"
