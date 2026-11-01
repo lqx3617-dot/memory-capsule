@@ -40,20 +40,30 @@ def one_atom(db, content, fact_type="fact"):
 
 
 def main() -> int:
-    print("1. 一次 flush 里合并的 4 次命中，要按 4 次累加 s_short")
+    print("1. 一次 flush 里合并的 3 次命中，要按 3 次累加 s_short")
     db = bm.MemoryDB(":memory:")
     try:
         aid = one_atom(db, "召回计数要按次数累加短期强度")
+        # 刚写入的 s_short 就是 1.0（在饱和点上），直接加看不出「按次」和「只加一次」的
+        # 区别 —— 先压到 0.2，3 次 ×0.15 = 0.65，正好落在不饱和区间里。
+        db.conn.execute(
+            "UPDATE atoms SET s_short = 0.2, s_long = 0.5 WHERE id = ?", (aid,)
+        )
+        db.conn.commit()
         s0, l0 = strengths(db, aid)
         gain = float(db.config.stm_gain)
-        db.note_access(aid, times=4)
+        to_ltm = float(db.config.stm_to_ltm)
+        db.note_access(aid, times=3)
         db.flush_access()
         s1, l1 = strengths(db, aid)
-        expect = min(1.0, s0 + 4 * gain)
-        check(abs(s1 - expect) < 1e-9,
-              "s_short = %.4f（期望 %.4f）" % (s1, expect))
-        check(s1 > s0, "短期池确实涨了（%.4f > %.4f）" % (s1, s0))
-        check(l1 >= l0, "长期池没被写坏（%.4f >= %.4f）" % (l1, l0))
+        expect_s = min(1.0, s0 + 3 * gain)
+        expect_l = min(1.0, l0 + to_ltm * (s0 + (s0 + gain) + (s0 + 2 * gain)))
+        check(abs(s1 - expect_s) < 1e-9,
+              "s_short = %.4f（期望 %.4f）" % (s1, expect_s))
+        check(abs(l1 - expect_l) < 1e-9,
+              "s_long = %.6f（期望 %.6f）" % (l1, expect_l))
+        check(s1 > s0 and l1 > l0,
+              "两个池都涨了（%.4f>%.4f, %.4f>%.4f）" % (s1, s0, l1, l0))
     finally:
         db.close()
 
@@ -63,6 +73,12 @@ def main() -> int:
     try:
         a1 = one_atom(db_a, "同一句记忆用于比较合并与分开刷盘")
         a2 = one_atom(db_b, "同一句记忆用于比较合并与分开刷盘")
+        # 同样先压到不饱和区间，否则两边都顶在 1.0，比了等于没比。
+        for target, atom_id in ((db_a, a1), (db_b, a2)):
+            target.conn.execute(
+                "UPDATE atoms SET s_short = 0.4, s_long = 0.3 WHERE id = ?", (atom_id,)
+            )
+            target.conn.commit()
         db_a.note_access(a1, times=3)
         db_a.flush_access()
         s_batch, l_batch = strengths(db_a, a1)
