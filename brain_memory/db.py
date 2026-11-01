@@ -453,13 +453,22 @@ class MemoryDB:
                 return fh.read()
 
     def _ensure_fts(self, conn: sqlite3.Connection) -> None:
-        """建 atoms_fts：trigram 优先，不可用则 unicode61 + 查询侧 bigram 展开。"""
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='atoms_fts'"
-        ).fetchone()
-        if row is not None and row[0]:
-            ddl = str(row[0]).lower()
-            self._fts_tokenizer = _FTS_TRIGRAM if "trigram" in ddl else _FTS_UNICODE
+        """建 atoms_fts：trigram 优先，不可用则 unicode61 + 查询侧 bigram 展开。
+
+        ⚠ 这里是并发热点：两个进程同时打开同**一个新**库，都会读到
+        user_version=0、各走一遍建 schema。检查与建表之间有窗口 ——
+        A 查到空、B 也查到空，A 建成功，B 的 CREATE 就撞
+        `table atoms_fts already exists`；降级到 unicode61 再撞一次，
+        最后被当成「FTS5 完全不可用」抛出来。实测 py3.10 上 40 次挂 1 次。
+
+        现在两道保险：
+        1) `CREATE VIRTUAL TABLE IF NOT EXISTS` —— 撞了也不当错；
+        2) 任何失败都回头查一次 sqlite_master —— 表在，说明是别人建好的，
+           按它的 tokenizer 记下来，补一次 rebuild 就走。
+        """
+        detected = self._detect_fts_tokenizer(conn)
+        if detected is not None:
+            self._fts_tokenizer = detected
             return
 
         last_error: Exception | None = None
@@ -469,25 +478,48 @@ class MemoryDB:
         ):
             try:
                 conn.execute(
-                    "CREATE VIRTUAL TABLE atoms_fts USING fts5("
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS atoms_fts USING fts5("
                     "content, content='atoms', content_rowid='id', "
                     f"tokenize='{tokenizer}')"
                 )
             except sqlite3.Error as exc:
                 last_error = exc
+                detected = self._detect_fts_tokenizer(conn)  # 并发：可能别人刚建好
+                if detected is not None:
+                    self._fts_tokenizer = detected
+                    logger.info(
+                        "记忆胶囊: atoms_fts 由另一个连接建立，沿用 tokenizer=%s", detected
+                    )
+                    self._rebuild_fts(conn)
+                    return
                 logger.warning(
                     "记忆胶囊: FTS5 tokenizer=%s 不可用（%s），尝试下一个", tokenizer, exc
                 )
                 continue
             self._fts_tokenizer = label
             logger.info("记忆胶囊: atoms_fts 已建立 tokenizer=%s", label)
-            try:  # 已有数据时补齐索引
-                conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')")
-            except sqlite3.Error:
-                pass
+            self._rebuild_fts(conn)
             return
 
         raise DatabaseError(f"FTS5 完全不可用，无法建全文索引: {last_error}")
+
+    @staticmethod
+    def _detect_fts_tokenizer(conn: sqlite3.Connection) -> str | None:
+        """atoms_fts 存在时返回它的 tokenizer 标记，不存在返回 None。"""
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='atoms_fts'"
+        ).fetchone()
+        if row is None or not row[0]:
+            return None
+        return _FTS_TRIGRAM if "trigram" in str(row[0]).lower() else _FTS_UNICODE
+
+    @staticmethod
+    def _rebuild_fts(conn: sqlite3.Connection) -> None:
+        """已有数据时补齐 FTS 索引；被别的连接锁着就放过（下次 open 还会补）。"""
+        try:
+            conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')")
+        except sqlite3.Error:
+            pass
 
     # ------------------------------------------------------------ 向量 / LLM 探测
 

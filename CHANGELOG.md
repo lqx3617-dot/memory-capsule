@@ -77,6 +77,18 @@ bm.MemoryDB(path, {"enable_graph": False})   # 退回纯打分
 钉成确定行为。`check.sh --full` 失败时改为保留首跑输出 —— 之前直接丢进 `/dev/null`，
 「断言全过却 exit=1」这种偶发问题重跑就绿，什么证据都留不下。
 
+### 并发修复
+
+这两条都是 ~1/40 的偶发，正常跑一次根本看不见。用一次性压力探针
+在 py3.10–3.13 上各连跑 100 次才抓出来：
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| `FTS5 完全不可用，无法建全文索引: table atoms_fts already exists`，进程 exit=1 | 两个进程同时打开**新**库：都读到 `user_version=0`、都走一遍建 schema；`_ensure_fts` 先 `SELECT sqlite_master` 再 `CREATE VIRTUAL TABLE`，检查与建表之间有窗口 | `CREATE VIRTUAL TABLE IF NOT EXISTS`；任何失败都回查 `sqlite_master`，表在就沿用它的 tokenizer 并补一次 `rebuild` |
+| 两进程各写 20 条，合并后只剩 39 条，断言 `>= 40` 红 | 测试内容用 `os.urandom(8).hex()`：hex 只有 16 种字符，两条随机串的 trigram 偶尔 ≥ `dedup_similarity=0.9`，被当成重复合并 | 改长 base64（64 种字符）+ 每条唯一编号：数字不相交走「不可能重复」，长得也不像走相似度 |
+
+修完 400 次连跑（4 版本 × 100 次）0 失败。`test_concurrency` 本身就是这两个 bug 的回归测试。
+
 ## v1.5.1 —— 2026-10-31
 
 补完事件识别：`detect_event()` / `db.note_event()`，`ingest(user)` 自动接入。
