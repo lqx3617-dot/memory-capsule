@@ -105,10 +105,11 @@ if [ "$FULL" -eq 1 ]; then
       printf '       重跑输出（末尾 20 行）\n'
       tail -20 "$LOG2"
       if [ -n "$GITHUB_ACTIONS" ]; then
-        printf '::warning::%s 偶发：首跑 exit=%s，重跑通过 —— 不算失败，但要跟进\n' "$script" "$rc"
+        printf '%s\n' "::warning::$script 偶发：首跑 exit=$rc，重跑通过 —— 不算失败，但要跟进"
       fi
       if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-        printf '- ⚠ `%s` 偶发：首跑 exit=%s / 重跑通过（详见本 job 日志）\n' "$script" "$rc" >>"$GITHUB_STEP_SUMMARY"
+        # ⚠ 格式串不能以 '-' 开头：dash 的 printf 会把它当选项，报 Illegal option -
+        printf '%s\n' "- ⚠ \`$script\` 偶发：首跑 exit=$rc / 重跑通过（详见本 job 日志）" >>"$GITHUB_STEP_SUMMARY"
       fi
     else
       bad "$script (首跑 exit=$rc，重跑 exit=$rc2)"
