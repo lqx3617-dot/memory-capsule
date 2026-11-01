@@ -1,0 +1,22 @@
+name: perf
+
+# 一次性性能探针：写入吞吐 / recall 延迟随规模变化。拿到数据就删。
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/perf.yml"
+      - "scripts/bench_probe.py"
+      - "brain_memory/**"
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 跑性能探针
+        run: python scripts/bench_probe.py
