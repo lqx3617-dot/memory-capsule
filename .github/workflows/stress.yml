@@ -1,0 +1,48 @@
+name: stress
+
+# 一次性探针：连跑 test_concurrency，把「偶发」变成可数的失败率。
+# 拿到证据就删 —— 不要让它变成常驻 CI 噪声。
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/stress.yml"
+      - "tests/test_concurrency.py"
+      - "brain_memory/**"
+
+jobs:
+  concurrency:
+    name: concurrency40-py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 连跑 40 次 test_concurrency，记录失败样本
+        run: |
+          mkdir -p /tmp/runs
+          fail=0
+          for i in $(seq 1 40); do
+            if python tests/test_concurrency.py >"/tmp/runs/$i.log" 2>&1; then
+              :
+            else
+              fail=$((fail + 1))
+              echo "::group::失败样本 #$i"
+              cat "/tmp/runs/$i.log"
+              echo "::endgroup::"
+            fi
+          done
+          echo "失败 $fail / 40"
+          {
+            echo "### py${{ matrix.python }}：test_concurrency 连跑 40 次"
+            echo ""
+            echo "| 次数 | 失败 |"
+            echo "|---|---|"
+            echo "| 40 | $fail |"
+          } >>"$GITHUB_STEP_SUMMARY"
