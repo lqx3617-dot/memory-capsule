@@ -41,10 +41,11 @@ def main() -> int:
         print("4. LIKE 兜底（FTS 零命中）同样走现算")
         db.remember("s", "爸爸喜欢喝乌龙茶", fact_type="preference", confidence=0.55)
         # 2 字查询在 trigram 下不可用，会走 LIKE 兜底。
-        # 存储 quality=0.55 < 0.8，但现算 ≈1.0 —— 旧实现会把它过滤掉。
-        hits = db.recall("乌龙", min_quality=0.8)
+        # 存储 quality=0.55，现算 = 0.4×s_short + 0.6×s_long = 0.4+0.3 = 0.70（双速率）。
+        # 门槛设 0.65：存储值过不去、现算能过去 —— 这才测得出「用的是现算值」。
+        hits = db.recall("乌龙", min_quality=0.65)
         if not hits:
-            print("[FAIL] LIKE 兜底仍按存储快照过滤（存储 0.55 < 0.8，现算约 1.0）")
+            print("[FAIL] LIKE 兜底仍按存储快照过滤（存储 0.55 < 0.65，现算约 0.70）")
             return 1
         print("[OK]   LIKE 兜底用现算质量，没被快照挡住")
 

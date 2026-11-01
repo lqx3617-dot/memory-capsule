@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterable
 
+from . import graph as _graph
 from .endocrine import f_endo
 from .forget import compute_quality
 from .types import Memory, parse_utc
@@ -81,7 +82,7 @@ _SELECT = (
     "a.confidence AS confidence, a.quality AS quality, a.fact_type AS fact_type, "
     "a.entity_id AS entity_id, a.access_count AS access_count, a.feedback AS feedback, "
     "a.created_at AS created_at, a.last_accessed_at AS last_accessed_at, "
-    "a.is_core AS is_core, a.mood AS mood, "
+    "a.is_core AS is_core, a.mood AS mood, a.s_short AS s_short, a.s_long AS s_long, "
     "bm25(atoms_fts) AS rank "
     "FROM atoms_fts JOIN atoms a ON a.id = atoms_fts.rowid "
     "WHERE atoms_fts MATCH ? AND a.state = 'active'"
@@ -114,7 +115,8 @@ def _like_fallback(conn, query: str, limit: int) -> list:
     params = ["%" + t + "%" for t in toks]
     sql = (
         "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-        "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, mood, 0.0 AS rank "
+        "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, mood, "
+        "s_short, s_long, 0.0 AS rank "
         "FROM atoms WHERE state = 'active' AND (" + where + ") "
         "ORDER BY id DESC LIMIT ?"
     )
@@ -132,7 +134,8 @@ def _rrf(rankings: list[list[int]], k: int) -> dict[int, float]:
 
 _ROW_SQL = (
     "SELECT id, content, source_event_id, confidence, quality, fact_type, "
-    "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, mood FROM atoms "
+    "entity_id, access_count, feedback, created_at, last_accessed_at, is_core, mood, "
+    "s_short, s_long FROM atoms "
     "WHERE state = 'active' AND id IN ({marks})"
 )
 
@@ -152,6 +155,8 @@ def live_quality(cfg, row: dict) -> float:
             last_active=parse_utc(row.get("last_accessed_at")) or parse_utc(row.get("created_at")),
             refs=0,
             access_count=int(row.get("access_count") or 0),
+            s_short=float(row.get("s_short") if row.get("s_short") is not None else 1.0),
+            s_long=float(row.get("s_long") if row.get("s_long") is not None else 0.5),
         )
     except Exception:
         return float(row.get("quality") or 0.0)
@@ -452,6 +457,38 @@ def search(
             for atom_id, score in ranked_items
         ]
         ranked_items.sort(key=lambda item: item[1], reverse=True)
+
+    # ---- 图谱联想：电势扩散 + 个性化 PageRank ----
+    # 语义检索只找「像」的；扩散找「被联想连起来」的。
+    # pot_next = pot_current × SPREAD_DECAY × synapse_weight，最多 SPREAD_HOPS 跳。
+    if cfg.enable_graph and ranked_items:
+        try:
+            seed_k = max(1, int(cfg.graph_seed_k))
+            seeds = {aid: sc for aid, sc in ranked_items[:seed_k]}
+            with db._read_conn() as conn:
+                pot = _graph.spread(conn, seeds)
+                extra_ids = [i for i in pot if i not in rows_by_id]
+                if extra_ids:
+                    rows_by_id.update(_fetch_rows(conn, extra_ids))
+                edges = _graph.load_edges(conn, pot.keys())
+            if len(pot) > len(seeds):
+                pr = _graph.personalized_pagerank(edges, pot)
+                max_pr = max(pr.values()) or 1.0
+                base = {aid: sc for aid, sc in ranked_items}
+                max_sc = max(base.values()) or 1.0
+                w = float(cfg.graph_weight)
+                merged: list[tuple[int, float]] = []
+                for aid in pot:
+                    if aid not in rows_by_id:
+                        continue
+                    score = (w * (pr.get(aid, 0.0) / max_pr)
+                             + (1.0 - w) * (base.get(aid, 0.0) / max_sc))
+                    merged.append((aid, score))
+                if merged:
+                    merged.sort(key=lambda item: item[1], reverse=True)
+                    ranked_items = merged
+        except Exception as exc:
+            logging.getLogger("brain_memory").debug("recall: 图谱扩散跳过（%s）", exc)
 
     # ---- 预算截断 ----
     out: list[Memory] = []

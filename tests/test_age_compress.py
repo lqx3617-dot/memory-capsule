@@ -53,22 +53,29 @@ def main() -> int:
     check(near(huge, cfg.age_compress_cap_d),
           "极老记忆封顶到 %.0f（实际 %.2f）" % (cfg.age_compress_cap_d, huge))
 
-    print("3. 压缩确实让老记忆衰减更慢")
+    print("3. 压缩让老记忆衰减更慢（双速率下的对比）")
     now = datetime.now(timezone.utc)
     old = now - timedelta(days=180)
     q = compute_quality(cfg=cfg, feedback=1.0, fact_type="fact",
                         last_active=old, now=now)
-    raw_decay = 0.5 ** (180.0 / cfg.halflife_semantic_d)
-    check(q > raw_decay,
-          "180 天：压缩后 quality=%.3f > 未压缩 %.3f" % (q, raw_decay))
-    check(q > 0.5, "180 天仍有 %.3f，不会被当成「忘了」" % q)
+    # 双速率下：短期池早掉光，长期池 s_long=0.5 按半衰期掉。
+    # 若不做时间压缩，长期池 180 天只剩 0.5^(180/90)=0.25 -> 0.6*0.5*0.25=0.075。
+    raw = cfg.w_long * 0.5 * (0.5 ** (180.0 / cfg.halflife_semantic_d))
+    check(q > raw, "180 天：压缩后 %.3f > 纯半衰期 %.3f" % (q, raw))
+    check(q > 0.15, "180 天仍有 %.3f，不会被当成「忘了」" % q)
 
-    print("4. 7 天内不受影响")
+    print("4. 6 天：短期池已掉光，长期池主导")
     fresh = now - timedelta(days=6)
     q6 = compute_quality(cfg=cfg, feedback=1.0, fact_type="fact",
                          last_active=fresh, now=now)
-    raw6 = 0.5 ** (6.0 / cfg.halflife_semantic_d)
-    check(near(q6, raw6, 1e-6), "6 天：压缩前后一致（%.4f）" % q6)
+    q0 = compute_quality(cfg=cfg, feedback=1.0, fact_type="fact",
+                         last_active=now, now=now)
+    check(q6 < q0, "6 天比刚写入低（%.3f < %.3f）" % (q6, q0))
+    check(q6 > 0.2, "6 天仍有 %.3f，长期池撑着" % q6)
+    # 短期池的时间常数决定了「12 小时后基本掉光」
+    q_12h = compute_quality(cfg=cfg, feedback=1.0, fact_type="fact",
+                            last_active=now - timedelta(hours=12), now=now)
+    check(q_12h < q0 * 0.9, "12 小时后短期池衰减明显（%.3f < %.3f）" % (q_12h, q0))
 
     print("\n%s" % ("全部通过" if not FAILS else "失败 %d 项" % len(FAILS)))
     return 0 if not FAILS else 1

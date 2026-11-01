@@ -339,6 +339,14 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any],
         "INSERT INTO atoms_fts(rowid, content) VALUES (?, ?)", (atom_id, trimmed)
     )
 
+    # 图谱：和同实体 / 内容够像的已有原子连双向边（联想，不是分类）
+    if getattr(cfg, "enable_graph", True):
+        try:
+            from .graph import build_links
+            build_links(conn, atom_id, trimmed, entity_id, cfg, now=utc_now())
+        except Exception:
+            pass
+
     if conflict_id is not None:
         conn.execute(
             "UPDATE atoms SET state = 'superseded', state_changed_at = ? WHERE id = ?",

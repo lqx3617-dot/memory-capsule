@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS atoms (
     is_core             INTEGER NOT NULL DEFAULT 0,
     -- 写入那一刻的心情值（-1~1），recall 的 f_endo 用它做同向放大
     mood                REAL    NOT NULL DEFAULT 0,
+    -- 双速率衰减的两个池：s_short 按小时掉，s_long 按天掉；
+    -- 每被访问一次，一部分从短期巩固进长期（见 forget.bump_strength）
+    s_short             REAL    NOT NULL DEFAULT 1.0,
+    s_long              REAL    NOT NULL DEFAULT 0.5,
     state               TEXT    NOT NULL DEFAULT 'active'
                         CHECK (state IN ('active', 'silent', 'archived', 'superseded')),
     state_changed_at    TEXT,
@@ -90,6 +94,17 @@ CREATE TABLE IF NOT EXISTS entity_pages (
     updated_at TEXT
 );
 
+-- ---------------------------------------------------------------- 突触关系（图谱联想）
+-- 双向边由 promote 在建立时同时写两条；weight 0~1，越大越容易互相激活。
+CREATE TABLE IF NOT EXISTS mem_graph (
+    source_id  INTEGER NOT NULL REFERENCES atoms(id) ON DELETE CASCADE,
+    target_id  INTEGER NOT NULL REFERENCES atoms(id) ON DELETE CASCADE,
+    weight     REAL    NOT NULL DEFAULT 0.5,
+    created_at TEXT    NOT NULL,
+    PRIMARY KEY (source_id, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_target ON mem_graph(target_id);
+
 -- ---------------------------------------------------------------- 内分泌状态
 -- 四个激素量，一行一个。基线见 endocrine.HORMONES。
 CREATE TABLE IF NOT EXISTS system_state (
@@ -115,4 +130,5 @@ CREATE INDEX IF NOT EXISTS idx_journal_created ON journal(created_at);
 -- v1 -> v2：atoms 增加 embedding BLOB（向量本身，vec0 只是可选加速索引）
 -- v2 -> v3：atoms 增加 is_core（核心事实保护），衰老改用 dt_eff 时间压缩
 -- v3 -> v4：atoms 增加 mood（写入时的心情快照）；新增 system_state（内分泌四量）
-PRAGMA user_version = 4;
+-- v4 -> v5：atoms 增加 s_short / s_long（双速率衰减的两池）；新增 mem_graph（突触）
+PRAGMA user_version = 5;

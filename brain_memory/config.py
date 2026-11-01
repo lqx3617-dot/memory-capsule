@@ -160,6 +160,19 @@ class MemoryConfig:
     age_compress_factor_mid: float = 0.5   # 7~30 天：超出部分按 50% 计
     age_compress_factor_far: float = 0.15  # 30 天以上：超出部分按 15% 计
     age_compress_cap_d: float = 90.0       # dt_eff 上限，防止极老记忆衰减到 0
+
+    # 双速率衰减：短期池按小时掉，长期池按天掉，quality 是两者加权和。
+    # 参数是经验值（图1 给了形状，具体时间常数按「一天内还能想起来 / 一个月后还记得」标定）。
+    tau_short_h: float = 2.0         # 短期池时间常数（小时）
+    w_short: float = 0.4             # 短期池权重
+    w_long: float = 0.6              # 长期池权重
+    stm_to_ltm: float = 0.02         # 每次被召回，短期强度转移进长期的比例
+    stm_gain: float = 0.15           # 每次被召回，短期强度加多少（饱和到 1）
+
+    # ---- 图谱联想 ----
+    enable_graph: bool = True        # 关掉后退回纯打分，不做扩散与 PageRank
+    graph_seed_k: int = 5            # 拿前几名当种子
+    graph_weight: float = 0.65       # 重排时 PageRank 的权重（剩下的给原分）
     halflife_episodic_d: float = 7.0
     halflife_semantic_d: float = 90.0
     halflife_procedural_d: float = 365.0
