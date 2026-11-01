@@ -141,7 +141,7 @@ def personalized_pagerank(edges: dict[int, list[tuple[int, float]]],
 def build_links(conn: Any, atom_id: int, content: str, entity_id: int | None,
                 cfg: Any, *, now: str) -> int:
     """给新原子连边（在调用方事务内执行）。返回建立的边数（单向计数）。"""
-    from .promote import similarity
+    from .promote import similarity_ge
 
     linked = 0
     rows = conn.execute(
@@ -152,7 +152,8 @@ def build_links(conn: Any, atom_id: int, content: str, entity_id: int | None,
     scored: list[tuple[float, int]] = []
     for row in rows:
         other_id = int(row[0])
-        sim = similarity(content, str(row[1]))
+        # 剪枝：低于 LINK_MIN_SIM 的候选不精算（同实体分支用 max(0.5, sim)，结论不变）
+        sim = similarity_ge(content, str(row[1]), LINK_MIN_SIM)
         same_entity = bool(entity_id) and row[2] is not None and int(row[2]) == int(entity_id)
         if same_entity:
             weight = max(LINK_SAME_ENTITY, sim)
