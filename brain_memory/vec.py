@@ -22,6 +22,7 @@ import re
 import struct
 import urllib.error
 import urllib.request
+from operator import mul as _mul
 from typing import Any, Callable, Protocol, Sequence
 
 import logging
@@ -208,6 +209,26 @@ def unpack_vector(blob: bytes | memoryview | None) -> list[float]:
     return list(struct.unpack("<%df" % count, data[: count * 4]))
 
 
+def unpack_vector_tuple(blob: bytes | memoryview | None) -> tuple:
+    """和 unpack_vector 一样，但不建 list —— 暴力扫描时每条省一次 384 元素拷贝。"""
+    if not blob:
+        return ()
+    data = bytes(blob)
+    count = len(data) // 4
+    if count == 0:
+        return ()
+    return struct.unpack("<%df" % count, data[: count * 4])
+
+
+def dot_product(a: Sequence[float], b: Sequence[float]) -> float:
+    """两个**已 L2 归一化**向量的余弦（= 点积）。
+
+    `sum(map(mul, ...))` 走 C 层循环，比 `for x, y in zip(a, b)` 累加快 3~4 倍。
+    5000 条 × 384 维的暴力扫描，这一处就是 recall 延迟的大头。
+    """
+    return sum(map(_mul, a, b))
+
+
 def distance_to_similarity(distance: float) -> float:
     """L2 距离 -> 余弦等价相似度（归一化向量下 L2^2 = 2 - 2cos）。
 
@@ -336,6 +357,9 @@ class VectorStore:
             return False
         if not vec:
             return False
+        # 存储侧统一归一化（幂等）：这样检索时余弦就退化成点积，
+        # 不必每条再算两次平方和。http / callable embedder 不保证归一化，这一步兜住。
+        vec = _l2_normalize(list(vec))
         try:
             conn.execute(
                 "UPDATE atoms SET embedding = ? WHERE id = ?",
@@ -369,6 +393,7 @@ class VectorStore:
             return []
         if not qvec:
             return []
+        qvec = _l2_normalize(list(qvec))
         if self.backend == "sqlite-vec":
             pairs = self._search_vec0(conn, qvec, limit)
         else:
@@ -448,11 +473,14 @@ class VectorStore:
             except Exception as exc:
                 self.last_error = "numpy 检索失败: " + str(exc)
 
+        # 纯 Python 兜底：存储与查询向量都做过 L2 归一化，余弦 == 点积。
+        # 原来每条还要算一遍 na / nb 的平方和 —— 三分之二的乘法是白做的。
+        dim = len(qvec)
         for row in rows:
-            vec = unpack_vector(row[1])
-            if len(vec) != len(qvec):
+            vec = unpack_vector_tuple(row[1])
+            if len(vec) != dim:
                 continue
-            scored.append((int(row[0]), cosine(qvec, vec)))
+            scored.append((int(row[0]), dot_product(qvec, vec)))
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[: int(limit)]
 

@@ -89,6 +89,34 @@ bm.MemoryDB(path, {"enable_graph": False})   # 退回纯打分
 
 修完 400 次连跑（4 版本 × 100 次）0 失败。`test_concurrency` 本身就是这两个 bug 的回归测试。
 
+### 性能（2026-11-01）
+
+先量后改。`scripts/bench.py` 加了基准（手动跑，不进 CI），5000 条库上的数据：
+
+| 项 | 改前 | 改后 | 手法 |
+|---|---|---|---|
+| 写入 ms/条（enable_graph=False） | 7.23 | **3.98** | 相似度比对加严格上界剪枝 |
+| recall 中位 ms（5000 条，graph=False） | 258.4 | **144.1** | 暴力余弦退化成点积 |
+| recall 中位 ms（5000 条，graph=True） | 293.3 | **180.9** | 同上 |
+
+**一、相似度剪枝**：`SequenceMatcher.ratio()` 是 O(n×m)，41 字中文约 50μs。
+`check_duplicate` 每次写入要跟最近 50 条比、`build_links` 要跟 200 条比，全是精算。
+`real_quick_ratio()` / `quick_ratio()` 都是 `ratio()` 的**严格上界**，上界低于阈值时
+真值必然也低 —— 用它们剪枝不改变任何判定结果，只省掉精算。
+
+> 注意：这个剪枝对「同字符集文本」无效（随机英文词都是 a-z、中文都是常用字，
+> 上界天然接近 1）。所以 `build_links` 的 200 次比对没有被剪掉 ——
+> 它现在是写入路径上唯一的重 CPU，`enable_graph=True` 时单条写入 ~21ms 全花在这。
+
+**二、向量检索退化成点积**：`index_atom` 存前统一 `_l2_normalize`（幂等），查询向量同样
+归一化 —— 这样余弦就是点积，不必每条再算两遍平方和（原来三分之二的乘法白做）。
+纯 Python 路径改用 `sum(map(mul, ...))`（C 层循环）+ tuple 解包（省 384 元素 list 拷贝）。
+`cosine()` 保留给外部与未归一化场景，语义不变。
+
+**还没动的**：recall 仍随库规模线性 —— 5000 条 144ms 里绝大部分是暴力扫描 5000×384 维。
+再往下的数量级要 ANN（sqlite-vec 或现成的 HNSW），不是纯 stdlib 该做的事。
+`pure_fallback_max_atoms=5000` 是当前的旋钮：库更大时它决定「只扫最近的多少条」。
+
 ## v1.5.1 —— 2026-10-31
 
 补完事件识别：`detect_event()` / `db.note_event()`，`ingest(user)` 自动接入。

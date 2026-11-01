@@ -86,12 +86,40 @@ def normalize(text: str) -> str:
 
 
 def similarity(a: str, b: str) -> float:
-    """纯 stdlib 相似度，短文本足够快（<1ms）。"""
+    """纯 stdlib 相似度。"""
     if not a or not b:
         return 0.0
     if a == b:
         return 1.0
     return SequenceMatcher(None, a, b).ratio()
+
+
+def similarity_ge(a: str, b: str, threshold: float) -> float:
+    """只在「可能 ≥ threshold」时才精算 ratio，给批量比对用。
+
+    SequenceMatcher.ratio() 是 O(n×m)，实测 41 字的中文短句约 50μs。
+    `build_links` 每次写入要跟最近 200 条比一遍 —— 200 × 50μs ≈ 10ms，
+    直接把单条写入从 4.7ms 拖到 17.7ms（见 perf 探针）。
+
+    real_quick_ratio() / quick_ratio() 都是 ratio() 的**严格上界**
+    （前者只看长度和字符数，后者还看字符交集）。上界低于阈值，真值必然也低 ——
+    所以用它们剪枝**不改变任何判定结果**，只是把大部分候选的精算省掉。
+
+    返回：达到阈值的就是真 ratio；没达到的返回一个不超过真值的上界。
+    调用方按「值 ≥ threshold」判断即可，结论与 similarity() 一致。
+    """
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    sm = SequenceMatcher(None, a, b)
+    upper = sm.real_quick_ratio()
+    if upper < threshold:
+        return upper
+    upper = sm.quick_ratio()
+    if upper < threshold:
+        return upper
+    return sm.ratio()
 
 
 def polarity(text: str) -> int:
@@ -181,7 +209,8 @@ def check_duplicate(
         _oname = _call_name(_other)
         if _cname and _oname and _cname == _oname and len(_cname) >= _CALL_MIN:
             return int(row[0]), 1.0
-        sim = similarity(content, _other)
+        # 带剪枝：不达 dedup_similarity 的候选不用精算 O(n×m) 的 ratio
+        sim = similarity_ge(content, _other, float(cfg.dedup_similarity))
         # 规则二：两条都带数字且完全不相交 → 不可能重复
         # （「十点下班」和「九点下班」相似度 0.857，必须挡住）
         _onums = _numbers(_other)
@@ -283,7 +312,9 @@ def promote_candidate(conn: Any, cfg: MemoryConfig, cand: dict[str, Any],
         "AND is_core = 1 ORDER BY id DESC LIMIT 20",
         (fact_type,),
     ).fetchall():
-        if similarity(content, str(row[1])) >= float(cfg.core_similarity):
+        if similarity_ge(content, str(row[1]), float(cfg.core_similarity)) >= float(
+            cfg.core_similarity
+        ):
             conn.execute(
                 "INSERT INTO journal(action, target_table, target_id, detail_json, created_at) "
                 "VALUES ('core_protect', 'atoms', ?, ?, ?)",
